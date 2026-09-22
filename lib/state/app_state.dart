@@ -1,21 +1,20 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../api/jm_api.dart';
-import '../api/jm_client.dart';
-import '../api/models.dart';
+import '../core/protocol/jm_api.dart';
+import '../core/protocol/jm_client.dart';
+import '../core/protocol/models.dart';
+import '../services/local_store.dart';
 
 /// 阅读方向。
 enum ReadDirection { vertical, horizontal }
 
-/// 全局应用状态：主题模式 / 阅读设置 / 登录态 / 图源与语言。
+/// 全局应用状态：主题模式 / 阅读设置 / 登录态 / 图源与语言 / 搜索历史。
 class AppState extends ChangeNotifier {
   AppState();
 
   final JmApi api = JmApi.instance;
   final JmClient _c = JmClient.instance;
+  final LocalStore _store = LocalStore.instance;
 
   bool _ready = false;
   bool get ready => _ready;
@@ -35,7 +34,7 @@ class AppState extends ChangeNotifier {
   bool get keepScreenOn => _keepScreenOn;
 
   // ---------- 图源 / 语言 ----------
-  bool _express = false; // 加速图源
+  bool _express = false;
   bool get express => _express;
 
   String _lang = 'TW';
@@ -49,37 +48,36 @@ class AppState extends ChangeNotifier {
   String? _initError;
   String? get initError => _initError;
 
+  // ---------- 搜索历史 ----------
+  List<String> _searchHistory = <String>[];
+  List<String> get searchHistory => List<String>.unmodifiable(_searchHistory);
+
   /// 初始化：恢复持久化设置 → 恢复登录态 → 解析主机并拉取 setting（图床）。
   Future<void> init() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final tm = prefs.getString('theme_mode') ?? 'system';
+      final tm = await _store.getString('theme_mode', 'system');
       _themeMode = switch (tm) {
         'light' => ThemeMode.light,
         'dark' => ThemeMode.dark,
         _ => ThemeMode.system,
       };
-      _volumeKeyPaging = prefs.getBool('volume_key_paging') ?? true;
+      _volumeKeyPaging = await _store.getBool('volume_key_paging', true);
       _readDirection =
-          (prefs.getString('read_direction') ?? 'vertical') == 'horizontal'
+          (await _store.getString('read_direction', 'vertical')) == 'horizontal'
               ? ReadDirection.horizontal
               : ReadDirection.vertical;
-      _keepScreenOn = prefs.getBool('keep_screen_on') ?? true;
-      _express = prefs.getBool('express') ?? false;
-      _lang = prefs.getString('lang') ?? 'TW';
+      _keepScreenOn = await _store.getBool('keep_screen_on', true);
+      _express = await _store.getBool('express', false);
+      _lang = await _store.getString('lang', 'TW');
 
-      final jwt = prefs.getString('jwt') ?? '';
-      final avs = prefs.getString('avs') ?? '';
-      final userMap = prefs.getString('user');
+      final jwt = await _store.getString('jwt');
+      final avs = await _store.getString('avs');
       _c.setAuth(jwt, avs);
-      if (userMap != null && userMap.isNotEmpty) {
-        try {
-          _user = LoginData.fromMapSafe(
-              Map<String, dynamic>.from(json.decode(userMap) as Map));
-        } catch (_) {
-          _user = null;
-        }
+      final userMap = await _store.getJson('user');
+      if (userMap.isNotEmpty) {
+        _user = LoginData.fromMapSafe(userMap);
       }
+      _searchHistory = await _store.getSearchHistory();
     } catch (_) {
       // 设置恢复失败不阻塞启动
     }
@@ -101,66 +99,65 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> _persist(String key, Object value) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      if (value is bool) {
-        await prefs.setBool(key, value);
-      } else if (value is String) {
-        await prefs.setString(key, value);
-      } else if (value is int) {
-        await prefs.setInt(key, value);
-      } else if (value is double) {
-        await prefs.setDouble(key, value);
-      }
-    } catch (_) {}
-  }
-
   // ---------- 设置项写入 ----------
 
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     notifyListeners();
-    await _persist('theme_mode', switch (mode) {
-      ThemeMode.light => 'light',
-      ThemeMode.dark => 'dark',
-      _ => 'system',
-    });
+    await _store.setString(
+        'theme_mode',
+        switch (mode) {
+          ThemeMode.light => 'light',
+          ThemeMode.dark => 'dark',
+          _ => 'system',
+        });
   }
 
   Future<void> setVolumeKeyPaging(bool v) async {
     _volumeKeyPaging = v;
     notifyListeners();
-    await _persist('volume_key_paging', v);
+    await _store.setBool('volume_key_paging', v);
   }
 
   Future<void> setReadDirection(ReadDirection d) async {
     _readDirection = d;
     notifyListeners();
-    await _persist('read_direction',
+    await _store.setString('read_direction',
         d == ReadDirection.horizontal ? 'horizontal' : 'vertical');
   }
 
   Future<void> setKeepScreenOn(bool v) async {
     _keepScreenOn = v;
     notifyListeners();
-    await _persist('keep_screen_on', v);
+    await _store.setBool('keep_screen_on', v);
   }
 
   Future<void> setExpress(bool v) async {
     _express = v;
     notifyListeners();
-    await _persist('express', v);
+    await _store.setBool('express', v);
   }
 
   Future<void> setLang(String v) async {
     _lang = v;
     _c.lang = v;
     notifyListeners();
-    await _persist('lang', v);
+    await _store.setString('lang', v);
     try {
       await api.updateSetting(v);
     } catch (_) {}
+  }
+
+  // ---------- 搜索历史 ----------
+
+  Future<void> addSearchHistory(String keyword) async {
+    _searchHistory = await _store.pushSearchHistory(keyword);
+    notifyListeners();
+  }
+
+  Future<void> clearSearchHistory() async {
+    _searchHistory = await _store.clearSearchHistory();
+    notifyListeners();
   }
 
   // ---------- 登录态 ----------
@@ -169,20 +166,17 @@ class AppState extends ChangeNotifier {
     _user = user;
     _c.setAuth(user.jwtToken, user.s);
     notifyListeners();
-    await _persist('jwt', user.jwtToken);
-    await _persist('avs', user.s);
-    await _persist('user', json.encode(user.toMap()));
+    await _store.setString('jwt', user.jwtToken);
+    await _store.setString('avs', user.s);
+    await _store.setJson('user', user.toMap());
   }
 
   Future<void> clearUser() async {
     _user = null;
     _c.setAuth('', '');
     notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('jwt');
-      await prefs.remove('avs');
-      await prefs.remove('user');
-    } catch (_) {}
+    await _store.remove('jwt');
+    await _store.remove('avs');
+    await _store.remove('user');
   }
 }

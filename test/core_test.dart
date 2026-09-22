@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:jmcomic/api/jm_crypto.dart';
-import 'package:jmcomic/utils/scramble.dart';
+import 'package:jmcomic/core/protocol/jm_crypto.dart';
+import 'package:jmcomic/core/utils/scramble.dart';
 
 void main() {
   group('JmCrypto', () {

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../api/jm_client.dart';
-import '../state/app_state.dart';
+import '../../core/protocol/jm_client.dart';
+import '../../state/app_state.dart';
+import '../../widgets/feedback.dart';
 
 /// 设置页：主题模式 / 阅读设置 / 图源 / 语言 / 线路。
 class SettingsPage extends StatelessWidget {
@@ -16,9 +17,9 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('设置')),
       body: ListView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         children: <Widget>[
-          _sectionTitle(context, '外观'),
+          SectionHeader(title: '外观'),
           Card(
             child: RadioGroup<ThemeMode>(
               groupValue: state.themeMode,
@@ -45,47 +46,27 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _sectionTitle(context, '阅读'),
+          SectionHeader(title: '阅读'),
           Card(
             child: Column(
               children: <Widget>[
                 SwitchListTile(
-                  title: const Text('音量键翻页'),
+                  title: const Text('音量键翻页',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: const Text('阅读时音量+/- 翻上一页/下一页'),
                   value: state.volumeKeyPaging,
                   onChanged: (bool v) => state.setVolumeKeyPaging(v),
                 ),
-                ListTile(
-                  title: const Text('翻页方向'),
-                  subtitle: Text(state.readDirection == ReadDirection.vertical
-                      ? '上下翻页'
-                      : '左右翻页'),
-                  trailing: SegmentedButton<ReadDirection>(
-                    segments: const <ButtonSegment<ReadDirection>>[
-                      ButtonSegment<ReadDirection>(
-                        value: ReadDirection.vertical,
-                        icon: Icon(Icons.swap_vert_rounded),
-                        label: Text('上下'),
-                      ),
-                      ButtonSegment<ReadDirection>(
-                        value: ReadDirection.horizontal,
-                        icon: Icon(Icons.swap_horiz_rounded),
-                        label: Text('左右'),
-                      ),
-                    ],
-                    selected: <ReadDirection>{state.readDirection},
-                    onSelectionChanged: (Set<ReadDirection> s) =>
-                        state.setReadDirection(s.first),
-                  ),
-                ),
                 SwitchListTile(
-                  title: const Text('阅读时常亮'),
+                  title: const Text('阅读时屏幕常亮',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: const Text('进入阅读器保持屏幕常亮'),
                   value: state.keepScreenOn,
                   onChanged: (bool v) => state.setKeepScreenOn(v),
                 ),
                 SwitchListTile(
-                  title: const Text('加速图源'),
+                  title: const Text('加速图源',
+                      style: TextStyle(fontWeight: FontWeight.w600)),
                   subtitle: const Text('comic_read 使用 express=on'),
                   value: state.express,
                   onChanged: (bool v) => state.setExpress(v),
@@ -94,7 +75,29 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _sectionTitle(context, '语言'),
+          SectionHeader(title: '翻页方向'),
+          SegmentedButton<ReadDirection>(
+            style: ButtonStyle(
+              visualDensity: VisualDensity.comfortable,
+            ),
+            segments: const <ButtonSegment<ReadDirection>>[
+              ButtonSegment<ReadDirection>(
+                value: ReadDirection.vertical,
+                icon: Icon(Icons.swap_vert_rounded),
+                label: Text('上下翻页'),
+              ),
+              ButtonSegment<ReadDirection>(
+                value: ReadDirection.horizontal,
+                icon: Icon(Icons.swap_horiz_rounded),
+                label: Text('左右翻页'),
+              ),
+            ],
+            selected: <ReadDirection>{state.readDirection},
+            onSelectionChanged: (Set<ReadDirection> s) =>
+                state.setReadDirection(s.first),
+          ),
+          const SizedBox(height: 16),
+          SectionHeader(title: '语言'),
           Card(
             child: RadioGroup<String>(
               groupValue: state.lang,
@@ -116,37 +119,34 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          _sectionTitle(context, '线路'),
+          SectionHeader(title: '线路'),
           const LinesCard(),
           const SizedBox(height: 16),
-          _sectionTitle(context, '关于'),
+          SectionHeader(title: '关于'),
           Card(
             child: ListTile(
-              leading: Icon(Icons.info_outline_rounded, color: cs.primary),
-              title: const Text('JMComic-Flutter'),
+              leading: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(Icons.info_outline_rounded, color: cs.primary),
+              ),
+              title: const Text('JMComic-Flutter',
+                  style: TextStyle(fontWeight: FontWeight.w700)),
               subtitle: const Text(
                 'v1.0.0 · Flutter 3.47.5\n'
                 '基于 JMcomic-API 协议逆向实现，覆盖全部 70 个端点。\n'
                 '仅供学习研究，请勿用于商业用途。',
-                style: TextStyle(fontSize: 12, height: 1.5),
+                style: TextStyle(fontSize: 12, height: 1.6),
               ),
               isThreeLine: true,
             ),
           ),
           const SizedBox(height: 24),
         ],
-      ),
-    );
-  }
-
-  Widget _sectionTitle(BuildContext context, String title) {
-    return Padding(
-      padding: const EdgeInsets.only(left: 8, bottom: 6),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-            ),
       ),
     );
   }

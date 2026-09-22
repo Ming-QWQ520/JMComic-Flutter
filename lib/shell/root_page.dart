@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'category_page.dart';
-import 'home_page.dart';
-import 'profile_page.dart';
-import 'search_page.dart';
+import '../pages/explore/category_page.dart';
+import '../pages/home/home_page.dart';
+import '../pages/search/search_page.dart';
+import '../pages/user/profile_page.dart';
 
-/// 根页面：底部导航（首页 / 分类 / 搜索 / 我的）。
+/// 根导航壳：首页 / 分类 / 搜索 / 我的。
 class RootPage extends StatefulWidget {
   const RootPage({super.key});
 
@@ -33,9 +33,9 @@ class _RootPageState extends State<RootPage> {
         onDestinationSelected: (int i) => setState(() => _index = i),
         destinations: const <Widget>[
           NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home_rounded),
-            label: '首页',
+            icon: Icon(Icons.rocket_launch_outlined),
+            selectedIcon: Icon(Icons.rocket_launch_rounded),
+            label: '发现',
           ),
           NavigationDestination(
             icon: Icon(Icons.grid_view_outlined),
@@ -43,7 +43,7 @@ class _RootPageState extends State<RootPage> {
             label: '分类',
           ),
           NavigationDestination(
-            icon: Icon(Icons.search_rounded),
+            icon: Icon(Icons.search_outlined),
             selectedIcon: Icon(Icons.search_rounded),
             label: '搜索',
           ),

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../api/jm_api.dart';
-import '../state/app_state.dart';
+import '../../core/protocol/jm_api.dart';
+import '../../state/app_state.dart';
 
 /// 登录页。
 class LoginPage extends StatefulWidget {
@@ -53,21 +53,29 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('登录')),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: <Widget>[
-          const SizedBox(height: 24),
-          Icon(Icons.menu_book_rounded,
-              size: 64, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+          Container(
+            width: 76,
+            height: 76,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.menu_book_rounded, size: 38, color: cs.primary),
+          ),
+          const SizedBox(height: 28),
           TextField(
             controller: _user,
             decoration: const InputDecoration(
               labelText: '用户名 / 邮箱',
               prefixIcon: Icon(Icons.person_outline_rounded),
-              border: OutlineInputBorder(),
             ),
           ),
           const SizedBox(height: 16),
@@ -77,7 +85,6 @@ class _LoginPageState extends State<LoginPage> {
             decoration: InputDecoration(
               labelText: '密码',
               prefixIcon: const Icon(Icons.lock_outline_rounded),
-              border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: Icon(_obscure
                     ? Icons.visibility_off_outlined
@@ -86,19 +93,18 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 26),
           FilledButton(
             onPressed: _loading ? null : _submit,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: _loading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('登录'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
+            child: _loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('登录'),
           ),
           const SizedBox(height: 8),
           TextButton(
@@ -106,14 +112,14 @@ class _LoginPageState extends State<LoginPage> {
                 MaterialPageRoute<void>(builder: (_) => const RegisterPage())),
             child: const Text('没有账号？注册 / 忘记密码'),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           Text(
             '仅用于学习研究，请使用自己拥有合法权限的账号。',
             textAlign: TextAlign.center,
             style: Theme.of(context)
                 .textTheme
                 .labelSmall
-                ?.copyWith(color: Theme.of(context).colorScheme.outline),
+                ?.copyWith(color: cs.outline),
           ),
         ],
       ),
@@ -184,49 +190,38 @@ class _RegisterPageState extends State<RegisterPage> {
         children: <Widget>[
           TextField(
             controller: _user,
-            decoration: const InputDecoration(
-              labelText: '用户名',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: '用户名'),
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _pass,
             obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '密码',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: '密码'),
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _email,
             keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(
-              labelText: '邮箱',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: '邮箱'),
           ),
           const SizedBox(height: 14),
           TextField(
             controller: _birthday,
-            decoration: const InputDecoration(
-              labelText: '生日（选填，如 2000-01-01）',
-              border: OutlineInputBorder(),
-            ),
+            decoration:
+                const InputDecoration(labelText: '生日（选填，如 2000-01-01）'),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 22),
           FilledButton(
             onPressed: _loading ? null : _submit,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: _loading
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Text('注册'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
             ),
+            child: _loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('注册'),
           ),
           const SizedBox(height: 10),
           TextButton(

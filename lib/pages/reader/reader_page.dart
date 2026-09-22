@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../api/jm_api.dart';
-import '../api/models.dart';
-import '../state/app_state.dart';
-import '../utils/scramble.dart';
+import '../../core/protocol/jm_api.dart';
+import '../../core/protocol/models.dart';
+import '../../core/utils/scramble.dart';
+import '../../state/app_state.dart';
 
 /// 阅读器页。
 ///
@@ -16,7 +16,7 @@ import '../utils/scramble.dart';
 /// - 音量键翻页（原生 MethodChannel 拦截，可在设置关闭）；
 /// - 上下 / 左右翻页方向切换，键盘方向键翻页；
 /// - 点击左/右 1/3 区域翻页，中间呼出工具栏；
-/// - 下一页预加载、页面跳转。
+/// - 下一页预加载、页码滑杆跳转、阅读时屏幕常亮。
 class ReaderPage extends StatefulWidget {
   const ReaderPage({super.key});
 
@@ -25,7 +25,7 @@ class ReaderPage extends StatefulWidget {
 }
 
 class _ReaderPageState extends State<ReaderPage> {
-  static const MethodChannel _volumeChannel =
+  static const MethodChannel _channel =
       MethodChannel('com.ming.jmcomic/volume');
 
   final JmApi _api = JmApi.instance;
@@ -48,7 +48,6 @@ class _ReaderPageState extends State<ReaderPage> {
   int _currentPage = 0;
   Timer? _hideBarTimer;
 
-  // 当前阅读设置（initState 后从 AppState 快照）
   ReadDirection _direction = ReadDirection.vertical;
   bool _volumeKeys = true;
   bool _express = false;
@@ -58,7 +57,8 @@ class _ReaderPageState extends State<ReaderPage> {
     super.didChangeDependencies();
     if (_albumId.isEmpty) {
       final args =
-          (ModalRoute.of(context)?.settings.arguments as Map?)?.cast<String, String>() ??
+          (ModalRoute.of(context)?.settings.arguments as Map?)
+              ?.cast<String, String>() ??
               const <String, String>{};
       _albumId = args['albumId'] ?? '';
       _chapterId = args['chapterId'] ?? '';
@@ -68,7 +68,7 @@ class _ReaderPageState extends State<ReaderPage> {
       _volumeKeys = app.volumeKeyPaging;
       _express = app.express;
       _load();
-      _setupVolumeChannel();
+      _setupNative();
     }
   }
 
@@ -77,16 +77,17 @@ class _ReaderPageState extends State<ReaderPage> {
     _hideBarTimer?.cancel();
     _pageCtrl.dispose();
     _focus.dispose();
-    _volumeChannel.setMethodCallHandler(null);
-    // 关闭阅读器后恢复系统音量键行为
-    unawaited(_volumeChannel
-        .invokeMethod('setEnabled', <String, dynamic>{'enabled': false})
-        .catchError((_) {}));
+    _channel.setMethodCallHandler(null);
+    // 离开阅读器：关闭常亮与音量键拦截
+    _channel.invokeMethod('keepScreenOn', <String, dynamic>{'enabled': false})
+        .catchError((_) {});
+    _channel.invokeMethod('setEnabled', <String, dynamic>{'enabled': false})
+        .catchError((_) {});
     super.dispose();
   }
 
-  Future<void> _setupVolumeChannel() async {
-    _volumeChannel.setMethodCallHandler((call) async {
+  Future<void> _setupNative() async {
+    _channel.setMethodCallHandler((call) async {
       if (call.method == 'volume') {
         if (call.arguments == 'up') {
           _prevPage();
@@ -96,13 +97,19 @@ class _ReaderPageState extends State<ReaderPage> {
       }
       return null;
     });
+    // 屏幕常亮（原生 FLAG_KEEP_SCREEN_ON）
+    final app = context.read<AppState>();
+    if (app.keepScreenOn) {
+      try {
+        await _channel.invokeMethod(
+            'keepScreenOn', <String, dynamic>{'enabled': true});
+      } catch (_) {}
+    }
     if (_volumeKeys) {
       try {
-        await _volumeChannel
+        await _channel
             .invokeMethod('setEnabled', <String, dynamic>{'enabled': true});
-      } catch (_) {
-        // 非 Android 平台或通道不可用时忽略
-      }
+      } catch (_) {}
     }
   }
 
@@ -119,8 +126,8 @@ class _ReaderPageState extends State<ReaderPage> {
       _error = '';
     });
     try {
-      final read =
-          await _api.getComicRead(_chapterId, express: _express ? 'on' : 'off');
+      final read = await _api.getComicRead(_chapterId,
+          express: _express ? 'on' : 'off');
       if (!mounted) return;
       final aid = int.tryParse(_albumId) ?? 0;
       final sid = int.tryParse(read.scrambleId) ?? 0;
@@ -174,7 +181,7 @@ class _ReaderPageState extends State<ReaderPage> {
 
   void _preload(int index) {
     if (index >= _images.length) return;
-    unawaited(_loadImage(index));
+    _loadImage(index);
   }
 
   void _nextPage() {
@@ -199,7 +206,6 @@ class _ReaderPageState extends State<ReaderPage> {
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOutCubic,
     );
-    // 立即触发相邻预加载
     _preload(i + 1);
     _scheduleHideBar();
   }
@@ -209,7 +215,9 @@ class _ReaderPageState extends State<ReaderPage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
-          content: Text(msg), duration: const Duration(milliseconds: 800)));
+        content: Text(msg),
+        duration: const Duration(milliseconds: 800),
+      ));
   }
 
   void _toggleBar() {
@@ -247,47 +255,11 @@ class _ReaderPageState extends State<ReaderPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       backgroundColor: Colors.black,
       extendBodyBehindAppBar: true,
-      appBar: _barVisible
-          ? AppBar(
-              backgroundColor: Colors.black54,
-              foregroundColor: Colors.white,
-              title: Text(
-                _title.isEmpty ? '阅读' : _title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              actions: <Widget>[
-                IconButton(
-                  tooltip: _direction == ReadDirection.vertical
-                      ? '当前: 上下翻页'
-                      : '当前: 左右翻页',
-                  icon: Icon(
-                    _direction == ReadDirection.vertical
-                        ? Icons.swap_vert_rounded
-                        : Icons.swap_horiz_rounded,
-                  ),
-                  onPressed: () {
-                    final app = context.read<AppState>();
-                    final d = _direction == ReadDirection.vertical
-                        ? ReadDirection.horizontal
-                        : ReadDirection.vertical;
-                    setState(() => _direction = d);
-                    app.setReadDirection(d);
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) {
-                        _pageCtrl.jumpToPage(_currentPage);
-                        _focus.requestFocus();
-                      }
-                    });
-                  },
-                ),
-              ],
-            )
-          : null,
+      extendBody: true,
+      appBar: _barVisible ? _buildAppBar() : null,
       body: Focus(
         focusNode: _focus,
         autofocus: true,
@@ -295,10 +267,56 @@ class _ReaderPageState extends State<ReaderPage> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (TapUpDetails d) => _onTap(d, context),
-          child: _buildContent(cs),
+          child: _buildContent(),
         ),
       ),
-      bottomNavigationBar: _barVisible ? _buildBottomBar(cs) : null,
+      bottomNavigationBar: _barVisible ? _buildBottomBar() : null,
+    );
+  }
+
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      foregroundColor: Colors.white,
+      flexibleSpace: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Colors.black.withValues(alpha: 0.75), Colors.transparent],
+          ),
+        ),
+      ),
+      title: Text(
+        _title.isEmpty ? '阅读' : _title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      actions: <Widget>[
+        IconButton(
+          tooltip: _direction == ReadDirection.vertical ? '当前: 上下翻页' : '当前: 左右翻页',
+          icon: Icon(
+            _direction == ReadDirection.vertical
+                ? Icons.swap_vert_rounded
+                : Icons.swap_horiz_rounded,
+          ),
+          onPressed: () {
+            final app = context.read<AppState>();
+            final d = _direction == ReadDirection.vertical
+                ? ReadDirection.horizontal
+                : ReadDirection.vertical;
+            setState(() => _direction = d);
+            app.setReadDirection(d);
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                _pageCtrl.jumpToPage(_currentPage);
+                _focus.requestFocus();
+              }
+            });
+          },
+        ),
+        const SizedBox(width: 4),
+      ],
     );
   }
 
@@ -315,10 +333,19 @@ class _ReaderPageState extends State<ReaderPage> {
     }
   }
 
-  Widget _buildContent(ColorScheme cs) {
+  Widget _buildContent() {
     if (_loading) {
       return const Center(
-          child: CircularProgressIndicator(color: Colors.white70));
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.white70, strokeWidth: 2.6),
+            SizedBox(height: 14),
+            Text('正在加载章节图片…',
+                style: TextStyle(color: Colors.white54, fontSize: 13)),
+          ],
+        ),
+      );
     }
     if (_error.isNotEmpty) {
       return Center(
@@ -327,9 +354,13 @@ class _ReaderPageState extends State<ReaderPage> {
           children: <Widget>[
             Text(_error,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 12),
-            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 16),
+            FilledButton.tonalIcon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('重试'),
+            ),
           ],
         ),
       );
@@ -351,11 +382,11 @@ class _ReaderPageState extends State<ReaderPage> {
         _preload(i + 1);
         _scheduleHideBar();
       },
-      itemBuilder: (BuildContext c, int i) => _pageImage(i, cs),
+      itemBuilder: (BuildContext c, int i) => _pageImage(i),
     );
   }
 
-  Widget _pageImage(int i, ColorScheme cs) {
+  Widget _pageImage(int i) {
     final bytes = _cache[i];
     if (bytes == null) {
       _loadImage(i);
@@ -363,13 +394,22 @@ class _ReaderPageState extends State<ReaderPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text('${i + 1} / ${_images.length}',
-                style: const TextStyle(color: Colors.white54)),
-            const SizedBox(height: 10),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(100),
+              ),
+              child: Text('${i + 1} / ${_images.length}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            ),
+            const SizedBox(height: 12),
             const SizedBox(
-              width: 26,
-              height: 26,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2.2, color: Colors.white60),
             ),
           ],
         ),
@@ -383,11 +423,21 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
-  Widget _buildBottomBar(ColorScheme cs) {
+  Widget _buildBottomBar() {
     return SafeArea(
       child: Container(
-        color: Colors.black87,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.85),
+              Colors.black.withValues(alpha: 0.4),
+              Colors.transparent,
+            ],
+          ),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
         child: Row(
           children: <Widget>[
             Text('$_currentPage',
@@ -398,6 +448,11 @@ class _ReaderPageState extends State<ReaderPage> {
                   trackHeight: 2,
                   thumbShape:
                       const RoundSliderThumbShape(enabledThumbRadius: 7),
+                  overlayShape:
+                      const RoundSliderOverlayShape(overlayRadius: 14),
+                  activeTrackColor: Theme.of(context).colorScheme.primary,
+                  inactiveTrackColor: Colors.white24,
+                  thumbColor: Colors.white,
                 ),
                 child: Slider(
                   min: 0,
@@ -420,3 +475,4 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 }
+

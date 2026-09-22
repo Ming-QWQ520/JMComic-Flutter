@@ -2,7 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../api/jm_api.dart';
+import '../../core/protocol/jm_api.dart';
+import '../../widgets/feedback.dart';
 
 /// 多媒体中心：小说 / 游戏 / 视频 / 博客（覆盖全部媒体域 API）。
 class MediaPage extends StatelessWidget {
@@ -15,8 +16,13 @@ class MediaPage extends StatelessWidget {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('多媒体中心'),
-          bottom: const TabBar(
-            tabs: <Widget>[
+          bottom: TabBar(
+            labelColor: Theme.of(context).colorScheme.primary,
+            unselectedLabelColor:
+                Theme.of(context).colorScheme.onSurfaceVariant,
+            indicatorColor: Theme.of(context).colorScheme.primary,
+            dividerColor: Colors.transparent,
+            tabs: const <Widget>[
               Tab(text: '小说'),
               Tab(text: '游戏'),
               Tab(text: '视频'),
@@ -140,21 +146,21 @@ class _MediaListViewState extends State<MediaListView>
   }
 
   String _titleOf(Map<dynamic, dynamic> m) {
-    for (final k in const <String>['name', 'title', 'game_name']) {
+    for (final k in const ['name', 'title', 'game_name']) {
       if (m[k] != null && m[k].toString().isNotEmpty) return m[k].toString();
     }
     return '(无标题)';
   }
 
   String _idOf(Map<dynamic, dynamic> m) {
-    for (final k in const <String>['id', 'aid', 'game_id']) {
+    for (final k in const ['id', 'aid', 'game_id']) {
       if (m[k] != null && m[k].toString().isNotEmpty) return m[k].toString();
     }
     return '';
   }
 
   String _subOf(Map<dynamic, dynamic> m) {
-    for (final k in const <String>[
+    for (final k in const [
       'author', 'category', 'description', 'category_title', 'uid',
     ]) {
       if (m[k] != null && m[k].toString().isNotEmpty) {
@@ -192,10 +198,7 @@ class _MediaListViewState extends State<MediaListView>
       Navigator.push(
         context,
         MaterialPageRoute<void>(
-          builder: (_) => JsonViewerPage(
-            title: _titleOf(m),
-            data: detail,
-          ),
+          builder: (_) => JsonViewerPage(title: _titleOf(m), data: detail),
         ),
       );
     } catch (e) {
@@ -208,22 +211,15 @@ class _MediaListViewState extends State<MediaListView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final cs = Theme.of(context).colorScheme;
     if (_items.isEmpty && _loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const LoadingView();
     }
     if (_items.isEmpty && _failed) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Text('加载失败'),
-            FilledButton.tonal(onPressed: _retry, child: const Text('重试')),
-          ],
-        ),
-      );
+      return ErrorView(onRetry: _retry);
     }
     if (_items.isEmpty && _noMore) {
-      return const Center(child: Text('暂无内容'));
+      return const EmptyView();
     }
     return RefreshIndicator(
       onRefresh: () async {
@@ -235,45 +231,56 @@ class _MediaListViewState extends State<MediaListView>
         });
         _loadMore();
       },
-      child: ListView.builder(
+      child: ListView.separated(
         controller: _scroll,
-        itemCount: _items.length + (_noMore ? 0 : 1),
+        padding: const EdgeInsets.all(16),
+        itemCount: _items.length + (_noMore ? 1 : 1),
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (BuildContext c, int i) {
           if (i >= _items.length) {
-            return const Padding(
-              padding: EdgeInsets.all(12),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            );
+            return const TailLoader();
           }
           final item = _items[i];
           if (item is! Map) {
-            return ListTile(title: Text(item.toString()));
+            return Card(
+              child: ListTile(title: Text(item.toString())),
+            );
           }
-          return ListTile(
-            leading: CircleAvatar(
-              child: Text(
-                switch (widget.kind) {
-                  MediaKind.novel => '书',
-                  MediaKind.game => '游',
-                  MediaKind.video => '视',
-                  MediaKind.blog => '博',
-                },
+          return Card(
+            child: ListTile(
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              leading: Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: cs.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  switch (widget.kind) {
+                    MediaKind.novel => '书',
+                    MediaKind.game => '游',
+                    MediaKind.video => '视',
+                    MediaKind.blog => '博',
+                  },
+                  style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: cs.primary),
+                ),
               ),
+              title: Text(_titleOf(item),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+              subtitle: _subOf(item).isEmpty
+                  ? null
+                  : Text(_subOf(item),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+              trailing: Icon(Icons.chevron_right_rounded,
+                  color: cs.onSurfaceVariant),
+              onTap: () => _openDetail(item),
             ),
-            title: Text(_titleOf(item),
-                maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: _subOf(item).isEmpty
-                ? null
-                : Text(_subOf(item),
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.chevron_right_rounded),
-            onTap: () => _openDetail(item),
           );
         },
       ),
@@ -301,8 +308,7 @@ class JsonViewerPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title:
-              Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+          title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis)),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: SelectableText(

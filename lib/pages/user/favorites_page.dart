@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../api/jm_api.dart';
-import '../state/app_state.dart';
-import '../widgets/common.dart';
+import '../../core/protocol/jm_api.dart';
+import '../../state/app_state.dart';
+import '../../widgets/album_grid.dart';
 
 /// 收藏 / 历史列表页。
-enum FavoriteKind { album, history }
-
 class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key, this.kind = FavoriteKind.album});
 
@@ -16,6 +14,8 @@ class FavoritesPage extends StatefulWidget {
   @override
   State<FavoritesPage> createState() => _FavoritesPageState();
 }
+
+enum FavoriteKind { album, history }
 
 class _FavoritesPageState extends State<FavoritesPage> {
   String _order = 'mr';
@@ -31,6 +31,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
             ? null
             : <Widget>[
                 PopupMenuButton<String>(
+                  tooltip: '排序',
                   icon: const Icon(Icons.sort_rounded),
                   onSelected: (String v) => setState(() => _order = v),
                   itemBuilder: (_) => const <PopupMenuItem<String>>[
@@ -39,6 +40,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                     PopupMenuItem<String>(value: 'mt', child: Text('最多浏览')),
                   ],
                 ),
+                const SizedBox(width: 6),
               ],
       ),
       body: AlbumGrid(
