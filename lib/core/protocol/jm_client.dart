@@ -707,7 +707,7 @@ class JmClient {
       final bytes = builder.takeBytes();
       // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则视为失败回源）
       if (bytes.isEmpty || (bytes.length < 3000 && !urlStr.contains('?'))) {
-        throw const JmHttpException(0, '空白图');
+        throw JmHttpException(0, '空白图');
       }
       return bytes;
     }
