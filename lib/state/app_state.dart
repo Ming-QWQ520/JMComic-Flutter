@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 
+import '../core/constants.dart';
 import '../core/protocol/jm_api.dart';
 import '../core/protocol/jm_client.dart';
+import '../core/protocol/jm_domain.dart';
 import '../core/protocol/models.dart';
 import '../services/local_store.dart';
 
 /// 阅读方向。
-enum ReadDirection { vertical, horizontal }
+enum ReadDirection { vertical, horizontal, rightToLeft }
 
-/// 全局应用状态：主题模式 / 阅读设置 / 登录态 / 图源与语言 / 搜索历史。
+/// 全局应用状态：主题 / 阅读设置 / 登录态 / 线路与 DoH / 搜索历史。
 class AppState extends ChangeNotifier {
   AppState();
 
@@ -19,11 +21,11 @@ class AppState extends ChangeNotifier {
   bool _ready = false;
   bool get ready => _ready;
 
-  // ---------- 主题（默认跟随系统） ----------
-  ThemeMode _themeMode = ThemeMode.system;
-  ThemeMode get themeMode => _themeMode;
+  // ---------- 主题（对齐 qt 6 套配色） ----------
+  ThemeScheme _scheme = ThemeScheme.lightOrange;
+  ThemeScheme get scheme => _scheme;
 
-  // ---------- 阅读设置 ----------
+  // ---------- 阅读设置（对齐 qt Setting） ----------
   bool _volumeKeyPaging = true;
   bool get volumeKeyPaging => _volumeKeyPaging;
 
@@ -33,12 +35,33 @@ class AppState extends ChangeNotifier {
   bool _keepScreenOn = true;
   bool get keepScreenOn => _keepScreenOn;
 
+  /// 预加载页数（对齐 qt PreLoading）。
+  int _preLoad = 5;
+  int get preLoad => _preLoad;
+
   // ---------- 图源 / 语言 ----------
   bool _express = false;
   bool get express => _express;
 
-  String _lang = 'TW';
+  String _lang = 'CN';
   String get lang => _lang;
+
+  // ---------- 线路 / DoH（对齐 qt ProxySelectIndex 等） ----------
+  int _apiIndex = 1;
+  int get apiIndex => _apiIndex;
+
+  int _imgIndex = 1;
+  int get imgIndex => _imgIndex;
+
+  bool _enableDoh = false;
+  bool get enableDoh => _enableDoh;
+
+  int _dohIndex = 0;
+  int get dohIndex => _dohIndex;
+
+  /// 线路测速结果 host -> 毫秒（-1 失败）。
+  Map<String, int> speedResults = <String, int>{};
+  bool speedTesting = false;
 
   // ---------- 登录态 ----------
   LoginData? _user;
@@ -55,20 +78,22 @@ class AppState extends ChangeNotifier {
   /// 初始化：恢复持久化设置 → 恢复登录态 → 解析主机并拉取 setting（图床）。
   Future<void> init() async {
     try {
-      final tm = await _store.getString('theme_mode', 'system');
-      _themeMode = switch (tm) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      };
+      _scheme = ThemeScheme.fromKey(
+          await _store.getString('theme_scheme', 'light_orange'));
       _volumeKeyPaging = await _store.getBool('volume_key_paging', true);
-      _readDirection =
-          (await _store.getString('read_direction', 'vertical')) == 'horizontal'
-              ? ReadDirection.horizontal
-              : ReadDirection.vertical;
+      _readDirection = switch (await _store.getString('read_direction', 'vertical')) {
+        'horizontal' => ReadDirection.horizontal,
+        'rightToLeft' => ReadDirection.rightToLeft,
+        _ => ReadDirection.vertical,
+      };
       _keepScreenOn = await _store.getBool('keep_screen_on', true);
+      _preLoad = await _store.getInt('pre_load', 5);
       _express = await _store.getBool('express', false);
-      _lang = await _store.getString('lang', 'TW');
+      _lang = await _store.getString('lang', 'CN');
+      _apiIndex = await _store.getInt('api_index', 1);
+      _imgIndex = await _store.getInt('img_index', 1);
+      _enableDoh = await _store.getBool('enable_doh', false);
+      _dohIndex = await _store.getInt('doh_index', 0);
 
       final jwt = await _store.getString('jwt');
       final avs = await _store.getString('avs');
@@ -82,16 +107,17 @@ class AppState extends ChangeNotifier {
       // 设置恢复失败不阻塞启动
     }
 
-    // 主机解析 + 拉取全局 setting（img_host 封面图床）
+    // 主机解析（远程配置更新域名）；图床直接来自 qt PicUrlList 体系
     try {
-      await _c.init(language: _lang);
+      await _c.init(
+        api: _apiIndex,
+        img: _imgIndex,
+        language: _lang,
+        doh: _enableDoh,
+        dohIdx: _dohIndex + 1,
+      );
       _ready = true;
       notifyListeners();
-      try {
-        final setting = await api.getSetting();
-        if (setting.imgHost.isNotEmpty) _c.imgHost = setting.imgHost;
-        notifyListeners();
-      } catch (_) {}
     } catch (e) {
       _initError = e.toString();
       _ready = true;
@@ -101,16 +127,10 @@ class AppState extends ChangeNotifier {
 
   // ---------- 设置项写入 ----------
 
-  Future<void> setThemeMode(ThemeMode mode) async {
-    _themeMode = mode;
+  Future<void> setScheme(ThemeScheme s) async {
+    _scheme = s;
     notifyListeners();
-    await _store.setString(
-        'theme_mode',
-        switch (mode) {
-          ThemeMode.light => 'light',
-          ThemeMode.dark => 'dark',
-          _ => 'system',
-        });
+    await _store.setString('theme_scheme', s.key);
   }
 
   Future<void> setVolumeKeyPaging(bool v) async {
@@ -122,14 +142,19 @@ class AppState extends ChangeNotifier {
   Future<void> setReadDirection(ReadDirection d) async {
     _readDirection = d;
     notifyListeners();
-    await _store.setString('read_direction',
-        d == ReadDirection.horizontal ? 'horizontal' : 'vertical');
+    await _store.setString('read_direction', d.name);
   }
 
   Future<void> setKeepScreenOn(bool v) async {
     _keepScreenOn = v;
     notifyListeners();
     await _store.setBool('keep_screen_on', v);
+  }
+
+  Future<void> setPreLoad(int v) async {
+    _preLoad = v;
+    notifyListeners();
+    await _store.setInt('pre_load', v);
   }
 
   Future<void> setExpress(bool v) async {
@@ -143,9 +168,52 @@ class AppState extends ChangeNotifier {
     _c.lang = v;
     notifyListeners();
     await _store.setString('lang', v);
-    try {
-      await api.updateSetting(v);
-    } catch (_) {}
+  }
+
+  /// 切换 API 线路（1..n，对齐 qt ProxySelectIndex）。
+  Future<void> setApiIndex(int idx) async {
+    _apiIndex = idx;
+    _c.apiIndex = idx;
+    notifyListeners();
+    await _store.setInt('api_index', idx);
+  }
+
+  /// 切换图片线路。
+  Future<void> setImgIndex(int idx) async {
+    _imgIndex = idx;
+    _c.imgIndex = idx;
+    notifyListeners();
+    await _store.setInt('img_index', idx);
+  }
+
+  Future<void> setEnableDoh(bool v) async {
+    _enableDoh = v;
+    _c.enableDoh = v;
+    if (!v) _c.clearDns();
+    notifyListeners();
+    await _store.setBool('enable_doh', v);
+  }
+
+  Future<void> setDohIndex(int idx) async {
+    _dohIndex = idx;
+    _c.dohIndex = idx;
+    _c.clearDns();
+    notifyListeners();
+    await _store.setInt('doh_index', idx);
+  }
+
+  /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。
+  Future<void> testApiSpeed() async {
+    if (speedTesting) return;
+    speedTesting = true;
+    notifyListeners();
+    final out = <String, int>{};
+    for (final url in JmDomain.apiUrlList.value) {
+      out[url] = await _c.pingHost(url);
+    }
+    speedResults = out;
+    speedTesting = false;
+    notifyListeners();
   }
 
   // ---------- 搜索历史 ----------

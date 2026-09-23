@@ -28,8 +28,18 @@ class _SearchPageState extends State<SearchPage>
   AlbumGrid? _grid;
   String _keyword = '';
   String _order = 'mr';
-  List<String> _hotTags = <String>[];
-  bool _tagsLoading = true;
+
+  /// 搜索类型（对齐 qt GetSearchReq2 search_type）。
+  String _searchType = '';
+
+  static const Map<String, String> _searchTypes = <String, String>{
+    '': '全部',
+    'tag': '标签',
+    'author': '作者',
+    'work': '作品',
+    'character': '角色',
+    'site': '站内',
+  };
 
   @override
   bool get wantKeepAlive => true;
@@ -41,7 +51,6 @@ class _SearchPageState extends State<SearchPage>
     if (widget.initialQuery.trim().isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _search());
     }
-    _loadHotTags();
   }
 
   @override
@@ -54,35 +63,6 @@ class _SearchPageState extends State<SearchPage>
   /// 输入是否为纯数字（漫画编号）。
   bool get _isNumericQuery =>
       RegExp(r'^\d{1,12}$').hasMatch(_ctrl.text.trim());
-
-  Future<void> _loadHotTags() async {
-    try {
-      final data = await JmApi.instance.getHotTags();
-      final tags = <String>[];
-      void walk(dynamic v) {
-        if (v is List) {
-          for (final item in v) {
-            walk(item);
-          }
-        } else if (v is Map) {
-          final name = v['name'] ?? v['tag'];
-          if (name is String && name.isNotEmpty) tags.add(name);
-          v.forEach((_, dynamic value) {
-            if (value is List || value is Map) walk(value);
-          });
-        }
-      }
-
-      walk(data);
-      if (!mounted) return;
-      setState(() {
-        _hotTags = tags.take(30).toList();
-        _tagsLoading = false;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _tagsLoading = false);
-    }
-  }
 
   Future<void> _search([String? kw]) async {
     final k = (kw ?? _ctrl.text).trim();
@@ -102,8 +82,8 @@ class _SearchPageState extends State<SearchPage>
 
   Future<List<SearchAlbum>?> _fetch(int page) async {
     try {
-      final r =
-          await JmApi.instance.searchComic(_keyword, page, order: _order);
+      final r = await JmApi.instance.searchComic(_keyword, page,
+          order: _order, searchType: _searchType);
       return r.content;
     } catch (_) {
       return null;
@@ -161,9 +141,9 @@ class _SearchPageState extends State<SearchPage>
             },
             itemBuilder: (_) => const <PopupMenuItem<String>>[
               PopupMenuItem<String>(value: 'mr', child: Text('最新')),
-              PopupMenuItem<String>(value: 'mt', child: Text('最多浏览')),
-              PopupMenuItem<String>(value: 'tf', child: Text('最多喜欢')),
-              PopupMenuItem<String>(value: 't', child: Text('最新发布')),
+              PopupMenuItem<String>(value: 'mv', child: Text('最多点击')),
+              PopupMenuItem<String>(value: 'mp', child: Text('最多图片')),
+              PopupMenuItem<String>(value: 'tf', child: Text('最多爱心')),
             ],
           ),
           const SizedBox(width: 4),
@@ -215,37 +195,25 @@ class _SearchPageState extends State<SearchPage>
                   ),
                   const SizedBox(height: 20),
                 ],
-                // 热门标签
-                SectionHeader(title: '热门标签'),
-                _tagsLoading
-                    ? const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Center(
-                          child: SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                      )
-                    : Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _hotTags
-                            .map((String t) => ActionChip(
-                                  label: Text(t),
-                                  labelStyle: const TextStyle(fontSize: 12.5),
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () {
-                                    _ctrl.text = t;
-                                    _search(t);
-                                  },
-                                ))
-                            .toList(),
-                      ),
+                // 搜索类型（对齐 qt search_type）
+                SectionHeader(title: '搜索类型'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _searchTypes.entries
+                      .map((MapEntry<String, String> e) => ChoiceChip(
+                            label: Text(e.value),
+                            selected: _searchType == e.key,
+                            onSelected: (_) {
+                              setState(() => _searchType = e.key);
+                              if (_keyword.isNotEmpty) _search(_keyword);
+                            },
+                          ))
+                      .toList(),
+                ),
                 const SizedBox(height: 24),
                 Text(
-                  '小提示：输入纯数字编号可直达漫画详情页；\n支持「主题 / 作者 / 作者:名字」等搜索语法。',
+                  '小提示：输入纯数字编号可直达漫画详情页；\n支持「作者:名字 / 作品:名字」等搜索语法。',
                   style: tt.labelSmall?.copyWith(
                       color: cs.onSurfaceVariant, height: 1.6),
                 ),

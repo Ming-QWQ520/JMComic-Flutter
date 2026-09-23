@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
-
-import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'jm_crypto.dart';
+import 'jm_domain.dart';
 
 /// 业务错误（HTTP 200 但业务 code != 200）。
 class JmApiException implements Exception {
@@ -15,7 +17,7 @@ class JmApiException implements Exception {
   String toString() => 'API 错误 code=$code msg=$msg';
 }
 
-/// HTTP 层错误（重试耗尽后抛出）。
+/// HTTP 层错误（重试与线路切换耗尽后抛出）。
 class JmHttpException implements Exception {
   JmHttpException(this.status, [this.body = '', this.cause]);
 
@@ -38,15 +40,17 @@ class JmResponse {
     this.msg = '',
     this.data,
     this.raw = const <String, dynamic>{},
+    this.cookies = const <String, String>{},
   });
 
   final int code;
   final String msg;
   final dynamic data;
   final Map<String, dynamic> raw;
+  final Map<String, String> cookies;
 }
 
-/// 主机配置（远程加密配置解密后的结构）。
+/// 远程主机配置（newsvr-2025.txt 解密后的结构）。
 class JmHostConfig {
   JmHostConfig({
     required this.setting,
@@ -55,8 +59,10 @@ class JmHostConfig {
   });
 
   factory JmHostConfig.fromMap(Map<String, dynamic> m) => JmHostConfig(
-        setting: (m['Setting'] as List?)?.cast<String>() ?? <String>[],
-        server: (m['Server'] as List?)?.cast<String>() ?? <String>[],
+        setting: (m['Setting'] as List?)?.map((e) => e.toString()).toList() ??
+            <String>[],
+        server: (m['Server'] as List?)?.map((e) => e.toString()).toList() ??
+            <String>[],
         jm3Server: ((m['jm3_Server'] as List?) ?? <dynamic>[])
             .map((e) => (e as List).map((x) => x.toString()).toList())
             .toList(),
@@ -67,51 +73,101 @@ class JmHostConfig {
   final List<List<String>> jm3Server;
 }
 
-/// JMComic 传输客户端。
+/// JMComic 传输客户端（对齐 tonquer/JMComic-qt 传输方案）。
 ///
-/// 负责：URL 拼接、Token 协议头、登录态头、重试与响应解密、线路管理。
-/// 主机解析顺序：显式指定 → 远程加密配置随机挑选 → APK 内置兜底配置。
+/// 负责：
+/// - API 域名 (Url2List) / 图片域名 (PicUrlList) 按索引选择，失败自动切换下一域名；
+/// - Token/Tokenparam 签名、登录态 (JWT + AVS Cookie)；
+/// - DoH (DNS over HTTPS) 可选解析与 IP 直连；
+/// - 远程配置 (newsvr-2025.txt) 拉取更新全部域名；
+/// - 响应解密（AES-256-ECB，密钥由请求时间戳派生）。
 class JmClient {
   JmClient._internal();
   static final JmClient instance = JmClient._internal();
 
-  final http.Client _http = http.Client();
+  HttpClient? _http;
+  HttpClient get _client => _http ??= _newHttpClient();
 
-  String _baseUrl = '';
+  HttpClient _newHttpClient() {
+    final c = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 12)
+      ..autoUncompress = true
+      ..userAgent = JmCrypto.userAgent;
+    c.connectionFactory = _connectionFactory;
+    return c;
+  }
+
+  /// 自定义连接工厂：启用 DoH 时按解析出的 IP 直连。
+  Future<ConnectionTask<Socket>> _connectionFactory(
+      Uri url, String? proxyHost, int? proxyPort) async {
+    var host = url.host;
+    var port = url.port;
+    if (proxyHost != null && proxyPort != null) {
+      host = proxyHost;
+      port = proxyPort;
+    }
+    final ip = _dnsCache[host];
+    if (ip == null || ip == host) {
+      return Socket.startConnect(host, port);
+    }
+    if (url.scheme == 'https') {
+      // IP 直连无法按域名校验证书，需信任
+      return SecureSocket.startConnect(
+        ip,
+        port,
+        onBadCertificate: (_) => true,
+        supportedProtocols: const <String>['http/1.1'],
+      );
+    }
+    return Socket.startConnect(ip, port);
+  }
+
+  // ---------- 线路管理 ----------
+
+  /// 当前 API 线路索引（1..4 普通，5 CDN，6 代理）。
+  int apiIndex = 1;
+
+  /// 当前图片线路索引。
+  int imgIndex = 1;
+
+  /// 当前 API 主机。
+  String get apiHost => JmDomain.getApiUrl(apiIndex);
+
+  /// 当前图片主机。
+  String get imgHost => JmDomain.getImgUrl(imgIndex);
+
+  /// 图片域名轮询游标（同一线路失败后自动切下一个）。
+  int _imgRotate = 0;
+
+  /// 语言参数（CN / TW）。
+  String lang = 'CN';
+
+  /// 远程配置。
   JmHostConfig? _hostConfig;
+  JmHostConfig? get hostConfig => _hostConfig;
 
-  /// 封面/头像图床主机（由 setting 接口填充）。
-  String imgHost = '';
+  // ---------- DoH ----------
 
-  /// 请求语言参数（TW / CN）。
-  String lang = 'TW';
+  /// 是否启用 DoH。
+  bool enableDoh = false;
+
+  /// 当前 DoH 服务索引。
+  int dohIndex = 0;
+
+  final Map<String, String> _dnsCache = <String, String>{};
+  final Map<String, List<Completer<String?>>> _dohWaiters =
+      <String, List<Completer<String?>>>{};
+
+  // ---------- 登录态 ----------
 
   String _jwt = '';
   String _avs = '';
   bool _initialized = false;
 
-  String get baseUrl => _baseUrl;
-  JmHostConfig? get hostConfig => _hostConfig;
+  String get jwt => _jwt;
+  String get avs => _avs;
   bool get isLogged => _jwt.isNotEmpty;
   bool get initialized => _initialized;
-
-  /// 显式指定线路主机（如 "www.cdnhjk.net"）。
-  void setBaseUrl(String host) {
-    var h = host.trim();
-    if (h.isEmpty) return;
-    if (!h.contains('://')) h = 'https://$h';
-    _baseUrl = h.endsWith('/') ? h : '$h/';
-  }
-
-  /// 全部可用线路 [主机, 线路名]。
-  List<List<String>> get lines => _hostConfig?.jm3Server ?? <List<String>>[];
-
-  /// 切换到第 [idx] 条线路（0 基）。
-  void switchLine(int idx) {
-    final ls = lines;
-    if (idx < 0 || idx >= ls.length) return;
-    setBaseUrl(ls[idx].first);
-  }
 
   /// 设置登录态。
   void setAuth(String jwt, String avs) {
@@ -119,147 +175,297 @@ class JmClient {
     _avs = avs;
   }
 
-  /// 主机解析：显式 > 远程配置 > 内置兜底。
-  Future<void> init({String? baseUrl, String language = 'TW'}) async {
+  /// 全部可用线路 [主机, 线路名]（远程 jm3_Server 配置）。
+  List<List<String>> get lines => _hostConfig?.jm3Server ?? <List<String>>[];
+
+  /// 初始化：拉取远程配置更新域名 → 标记就绪。
+  ///
+  /// 对齐 qt 启动流程：GetJmServerReq 拉取 newsvr-*.txt（k=v 文本），
+  /// 失败则回退加密配置解密，再失败用内置默认域名。
+  Future<void> init({
+    int? api,
+    int? img,
+    String language = 'CN',
+    bool doh = false,
+    int dohIdx = 0,
+  }) async {
+    if (api != null && api > 0) apiIndex = api;
+    if (img != null && img > 0) imgIndex = img;
     if (language.isNotEmpty) lang = language;
-    if (baseUrl != null && baseUrl.isNotEmpty) {
-      setBaseUrl(baseUrl);
-      _initialized = true;
-      return;
-    }
+    enableDoh = doh;
+    if (dohIdx > 0) dohIndex = dohIdx - 1;
+
+    // 1. 远程 k=v 配置（对齐 qt GetJmServerReq → UpdateSetting）
     for (final url in JmCrypto.hostConfigUrls) {
       try {
-        final resp = await _http
-            .get(Uri.parse(url), headers: <String, String>{
-          'User-Agent': JmCrypto.userAgent,
-        }).timeout(const Duration(seconds: 10));
-        if (resp.statusCode != 200) continue;
-        final cfg = JmCrypto.decryptHostConfig(utf8.decode(resp.bodyBytes));
-        if (cfg == null) continue;
-        final parsed = JmHostConfig.fromMap(cfg);
-        if (parsed.server.isEmpty) continue;
-        _hostConfig = parsed;
-        parsed.server.shuffle();
-        setBaseUrl(parsed.server.first);
-        _initialized = true;
-        return;
+        final text = await _plainGet(url);
+        if (text != null && JmDomain.updateSettingFromText(text)) {
+          break;
+        }
       } catch (_) {
         continue;
       }
     }
-    // 回退到 APK 内置兜底配置
-    final cfg = JmCrypto.decryptHostConfig(JmCrypto.backupHostCode);
-    if (cfg != null) {
-      final parsed = JmHostConfig.fromMap(cfg);
-      _hostConfig = parsed;
-      if (parsed.server.isNotEmpty) {
-        parsed.server.shuffle();
-        setBaseUrl(parsed.server.first);
-        _initialized = true;
-        return;
+
+    // 2. 远程加密配置（补充 jm3_Server 线路列表）
+    try {
+      final text = await _plainGet(JmDomain.jmServerUrl.value);
+      if (text != null) {
+        final cfg = JmCrypto.decryptHostConfig(text);
+        if (cfg != null) {
+          final parsed = JmHostConfig.fromMap(cfg);
+          if (parsed.jm3Server.isNotEmpty) _hostConfig = parsed;
+        }
+      }
+    } catch (_) {}
+
+    _initialized = true;
+  }
+
+  /// 简单 GET 文本（不走 API 协议）。
+  Future<String?> _plainGet(String url) async {
+    HttpClientRequest? req;
+    try {
+      req = await _client
+          .getUrl(Uri.parse(url))
+          .timeout(const Duration(seconds: 10));
+      final resp = await req.close().timeout(const Duration(seconds: 10));
+      if (resp.statusCode != 200) {
+        await resp.drain<void>();
+        return null;
+      }
+      return await _readText(resp);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------- DoH 解析 ----------
+
+  /// 通过 DoH 解析域名 IP（对齐 qt DnsOverHttpsReq）。
+  ///
+  /// 返回随机一个 A 记录 IP；失败返回 null。
+  Future<String?> dohResolve(String host) async {
+    if (!enableDoh) return null;
+    final cached = _dnsCache[host];
+    if (cached != null) return cached;
+
+    final waiters = _dohWaiters.putIfAbsent(host, () => <Completer<String?>>[]);
+    if (waiters.isNotEmpty) {
+      final c = Completer<String?>();
+      waiters.add(c);
+      return c.future;
+    }
+
+    final urls = JmDomain.dohUrlList.value;
+    for (var i = 0; i < urls.length; i++) {
+      final dohUrl = urls[(dohIndex + i) % urls.length];
+      try {
+        final sep = dohUrl.contains('?') ? '&' : '?';
+        final uri = Uri.parse('$dohUrl${sep}name=$host&type=A');
+        final req = await _client.openUrl('GET', uri).timeout(const Duration(seconds: 6));
+        req.headers.set('accept', 'application/dns-json');
+        final resp = await req.close().timeout(const Duration(seconds: 6));
+        final body = await _readText(resp);
+        if (resp.statusCode == 200 && body.isNotEmpty) {
+          final json = jsonDecode(body);
+          final answers = json['Answer'] as List?;
+          final ips = <String>[];
+          for (final a in answers ?? <dynamic>[]) {
+            final data = a is Map ? a['data']?.toString() ?? '' : '';
+            if (InternetAddress.tryParse(data) != null) ips.add(data);
+          }
+          if (ips.isNotEmpty) {
+            ips.shuffle();
+            _dnsCache[host] = ips.first;
+            for (final w in waiters) {
+              if (!w.isCompleted) w.complete(ips.first);
+            }
+            _dohWaiters.remove(host);
+            return ips.first;
+          }
+        }
+      } catch (_) {
+        continue;
       }
     }
-    throw JmHttpException(0, '主机解析失败(远程与内置均失败)');
+    for (final w in waiters) {
+      if (!w.isCompleted) w.complete(null);
+    }
+    _dohWaiters.remove(host);
+    return null;
   }
 
-  /// 构造带协议头的请求头。
-  ///
-  /// 返回的记录同时携带本次请求的时间戳 [ts]，
-  /// 服务端用同一 ts 派生 AES 密钥加密响应 data，解密时必须使用它。
-  ({Map<String, String> headers, String ts}) _headers(
-      {String? contentType}) {
+  void clearDns() => _dnsCache.clear();
+
+  // ---------- 请求头 ----------
+
+  Map<String, String> _apiHeaders({String? contentType}) {
     final t = JmCrypto.randomToken();
-    return (
-      headers: <String, String>{
-        'User-Agent': JmCrypto.userAgent,
-        'Tokenparam': t.tokenparam,
-        'Token': t.token,
-        if (_jwt.isNotEmpty) 'Authorization': 'Bearer $_jwt',
-        if (_avs.isNotEmpty) 'Cookie': 'AVS=$_avs',
-        'Content-Type': ?contentType,
-      },
-      ts: t.ts,
-    );
+    return <String, String>{
+      'tokenparam': t.tokenparam,
+      'token': t.token,
+      'accept-encoding': 'gzip',
+      if (_jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
+      if (_avs.isNotEmpty) 'cookie': 'AVS=$_avs',
+      if (contentType != null) 'Content-Type': contentType,
+    };
   }
 
-  /// 编码 GET query（过滤空值，自动补 lang）。
-  Map<String, String> _buildQuery(Map<String, dynamic> params) {
-    final q = <String, String>{};
+  /// `/chapter_view_template` 专用签名头（对齐 qt GetHeader2）。
+  Map<String, String> _scrambleHeaders() {
+    final t = JmCrypto.scrambleToken();
+    return <String, String>{
+      'tokenparam': t.tokenparam,
+      'token': t.token,
+      'user-agent': JmCrypto.userAgent,
+      'accept-encoding': 'gzip',
+    };
+  }
+
+  Map<String, String> _webHeaders({String? referer, String? contentType}) {
+    return <String, String>{
+      'accept':
+          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'accept-encoding': 'gzip, deflate, br',
+      'accept-language': 'zh-CN,zh;q=0.9',
+      'upgrade-insecure-requests': '1',
+      'user-agent': JmCrypto.webUserAgent,
+      if (contentType != null) 'content-type': contentType,
+      if (referer != null) 'referer': referer,
+    };
+  }
+
+  // ---------- URL 构造 ----------
+
+  /// 编码 query（过滤空值，自动补 lang，对齐 qt DictToUrl）。
+  String buildQuery(Map<String, dynamic> params, {bool withLang = true}) {
+    final parts = <String>[];
     params.forEach((k, v) {
       if (v == null) return;
       final s = v.toString();
       if (s.isEmpty) return;
-      q[k] = s;
+      parts.add('${Uri.encodeComponent(k)}=${Uri.encodeComponent(s)}');
     });
-    if (!q.containsKey('lang') && lang.isNotEmpty) q['lang'] = lang;
-    return q;
+    if (withLang && lang.isNotEmpty && !params.containsKey('lang')) {
+      parts.add('lang=${Uri.encodeComponent(lang)}');
+    }
+    return parts.join('&');
   }
 
-  String _fullUrl(String path) {
-    if (path.startsWith('http')) return path;
-    return _baseUrl + (path.startsWith('/') ? path.substring(1) : path);
+  String _apiUrl(String path, Map<String, dynamic> params, {bool withLang = true}) {
+    var base = apiHost;
+    if (!base.endsWith('/')) base = '$base/';
+    var p = path.startsWith('/') ? path.substring(1) : path;
+    final query = buildQuery(params, withLang: withLang);
+    var url = '$base$p';
+    if (query.isNotEmpty) url += '?$query';
+    return url;
   }
 
-  /// 统一请求入口（首次 + 最多 3 次重试；401/400 不重试）。
+  Map<String, dynamic> _withoutLang(Map<String, dynamic> params) {
+    final m = Map<String, dynamic>.from(params);
+    m.remove('lang');
+    return m;
+  }
+
+  // ---------- 核心请求 ----------
+
+  /// 统一 API 请求入口。
+  ///
+  /// 失败时自动切换下一 API 域名重试（对齐 qt ResetToSwitchNextUrl），
+  /// 最多遍历全部域名列表 1 轮。
   Future<JmResponse> _do(
     String method,
     String path, {
     Map<String, dynamic> params = const <String, dynamic>{},
     String? body,
     String? contentType,
+    bool withLang = true,
+    Map<String, String>? extraHeaders,
   }) async {
-    final url = Uri.parse(_fullUrl(path)).replace(
-      queryParameters: method == 'GET' ? _buildQuery(params) : null,
-    );
+    await _ensureReady();
+    final attemptMax = JmDomain.apiUrlList.value.length;
     Object? lastCause;
-    int? lastStatus;
-    String lastBody = '';
 
-    for (var attempt = 0; attempt < 4; attempt++) {
+    for (var attempt = 0; attempt < attemptMax; attempt++) {
+      final urlStr = _apiUrl(path, params, withLang: withLang);
       try {
-        // 每次尝试生成新 Token/ts；解密必须使用本次请求的 ts。
-        final h = _headers(contentType: contentType);
-        final req = http.Request(method, url)..headers.addAll(h.headers);
-        if (body != null && body.isNotEmpty) req.body = body;
-        final resp = await _http.send(req).timeout(const Duration(seconds: 20));
-
-        final respBody =
-            await http.Response.fromStream(resp).timeout(const Duration(seconds: 20));
-        lastStatus = resp.statusCode;
-        lastBody = respBody.body;
-
-        if (resp.statusCode < 200 || resp.statusCode > 299) {
-          if (resp.statusCode == 401 || resp.statusCode == 400) {
-            throw JmHttpException(resp.statusCode, _truncate(respBody.body));
-          }
-          continue; // 非 401/400 重试
+        final resp = await _send(
+          method,
+          Uri.parse(urlStr),
+          headers: {..._apiHeaders(contentType: contentType), ...?extraHeaders},
+          body: body,
+        );
+        if (resp != null) {
+          return await _decryptResponse(resp);
         }
-        return _decryptResponse(path, respBody.body, h.ts);
+        lastCause = 'HTTP 错误';
       } on JmApiException {
         rethrow;
-      } on JmHttpException {
-        rethrow;
+      } on JmHttpException catch (e) {
+        if (e.status == 401 || e.status == 400) rethrow;
+        lastCause = e;
       } catch (e) {
         lastCause = e;
-        continue;
       }
-    }
-    if (lastStatus != null && lastStatus != 0) {
-      throw JmHttpException(lastStatus, _truncate(lastBody));
+      // 切换下一个 API 域名重试
+      final list = JmDomain.apiUrlList.value;
+      if (list.isEmpty) break;
+      apiIndex = apiIndex % list.length + 1;
     }
     throw JmHttpException(0, '', lastCause);
   }
 
-  String _truncate(String s) => s.length <= 200 ? s : s.substring(0, 200);
+  /// 底层 HTTP 发送（支持 DoH 预解析）。
+  Future<HttpClientResponse?> _send(
+    String method,
+    Uri url, {
+    Map<String, String> headers = const <String, String>{},
+    String? body,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    if (enableDoh) await dohResolve(url.host);
+    final req = await _client.openUrl(method, url).timeout(timeout);
+    headers.forEach((k, v) => req.headers.set(k, v));
+    if (body != null && body.isNotEmpty) {
+      req.add(utf8.encode(body));
+    }
+    final resp = await req.close().timeout(timeout);
+    if (resp.statusCode < 200 || resp.statusCode > 299) {
+      await resp.drain<void>().catchError((_) {});
+      if (resp.statusCode == 401 || resp.statusCode == 400) {
+        throw JmHttpException(resp.statusCode);
+      }
+      return null; // 其它状态码 → 切换线路
+    }
+    return resp;
+  }
 
-  /// 解密响应信封 `{"code":..,"msg":"..","data":"<base64密文>"}`。
-  ///
-  /// [ts] 为本次请求 Tokenparam 中的秒级时间戳，与请求时的签名一致；
-  /// 服务端以此派生 AES 密钥，传错将导致所有加密响应解密失败。
-  JmResponse _decryptResponse(String path, String body, String ts) {
+  /// 读取响应文本（gzip 由 HttpClient 自动解压）。
+  Future<String> _readText(HttpClientResponse resp) async {
+    try {
+      return await resp.transform(utf8.decoder).join();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// 收集响应 set-cookie（登录 AVS 等）。
+  Map<String, String> _cookiesOf(HttpClientResponse resp) {
+    final out = <String, String>{};
+    for (final c in resp.cookies) {
+      if (c.name.isNotEmpty) out[c.name] = c.value;
+    }
+    return out;
+  }
+
+  /// 解密响应信封 `{"code":..,"msg"/"errorMsg":..,"data":"<base64密文>"}`。
+  Future<JmResponse> _decryptResponse(HttpClientResponse resp) async {
+    final body = await _readText(resp);
     Map<String, dynamic> envelope;
     try {
-      final decoded = json.decode(body);
+      final decoded = jsonDecode(body);
       if (decoded is Map<String, dynamic>) {
         envelope = decoded;
       } else {
@@ -270,95 +476,268 @@ class JmClient {
     }
 
     final code = (envelope['code'] as num?)?.toInt() ?? 0;
-    final msg = (envelope['msg'] ?? '').toString();
+    final msg = (envelope['msg'] ?? envelope['errorMsg'] ?? envelope['message'] ?? '')
+        .toString();
     final data = envelope['data'];
 
     if (code != 200) {
       throw JmApiException(code, msg);
     }
     if (data == null) {
-      return JmResponse(code: code, msg: msg, data: null, raw: envelope);
+      return JmResponse(
+          code: code,
+          msg: msg,
+          data: null,
+          raw: envelope,
+          cookies: _cookiesOf(resp));
     }
     // data 不是字符串 → 服务端直接返回明文
     if (data is! String) {
-      return JmResponse(code: code, msg: msg, data: data, raw: envelope);
+      return JmResponse(
+          code: code,
+          msg: msg,
+          data: data,
+          raw: envelope,
+          cookies: _cookiesOf(resp));
     }
     if (data.isEmpty) {
-      return JmResponse(code: code, msg: msg, data: null, raw: envelope);
+      return JmResponse(
+          code: code,
+          msg: msg,
+          data: null,
+          raw: envelope,
+          cookies: _cookiesOf(resp));
     }
 
-    final isAd =
-        path.contains('ad_content_all') || path.contains('advertise_all');
-    final plain = JmCrypto.decryptData(data, ts, isAd);
+    final ts = _lastTs;
+    final plain = JmCrypto.decryptData(data, ts);
     if (plain == null) {
       // 尝试明文解析（少数接口直接返回明文 JSON 字符串）
       try {
-        final decoded = json.decode(data);
-        return JmResponse(code: code, msg: msg, data: decoded, raw: envelope);
+        final decoded = jsonDecode(data);
+        return JmResponse(
+            code: code,
+            msg: msg,
+            data: decoded,
+            raw: envelope,
+            cookies: _cookiesOf(resp));
       } on FormatException {
         throw JmHttpException(0, '响应解密失败');
       }
     }
     try {
-      final decoded = json.decode(plain);
-      return JmResponse(code: code, msg: msg, data: decoded, raw: envelope);
+      final decoded = jsonDecode(plain);
+      return JmResponse(
+          code: code,
+          msg: msg,
+          data: decoded,
+          raw: envelope,
+          cookies: _cookiesOf(resp));
     } on FormatException {
       throw JmHttpException(0, '解密后 JSON 解析失败');
     }
   }
 
+  /// 最近一次请求的时间戳（解密 data 用）。
+  String _lastTs = '';
+
   // ---------- Transport ----------
 
-  /// GET 请求。
+  /// GET API 请求。
   Future<JmResponse> get(String path,
-      [Map<String, dynamic> params = const <String, dynamic>{}]) async {
+      [Map<String, dynamic> params = const <String, dynamic>{},
+      bool withLang = true]) async {
     await _ensureReady();
-    return _do('GET', path, params: params);
+    final t = JmCrypto.randomToken();
+    _lastTs = t.ts;
+    return _do('GET', path, params: params, withLang: withLang);
   }
 
-  /// POST 表单请求。
+  /// POST 表单 API 请求。
   Future<JmResponse> postForm(String path,
-      [Map<String, dynamic> params = const <String, dynamic>{}]) async {
+      [Map<String, dynamic> params = const <String, dynamic>{},
+      bool withLang = false]) async {
     await _ensureReady();
-    final q = _buildQuery(params);
-    final body = q.entries
-        .map((e) =>
-            '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
-        .join('&');
+    final t = JmCrypto.randomToken();
+    _lastTs = t.ts;
+    final body = buildQuery(params, withLang: false);
     return _do('POST', path,
-        body: body, contentType: 'application/x-www-form-urlencoded');
+        params: const <String, dynamic>{},
+        body: body,
+        contentType: 'application/x-www-form-urlencoded',
+        withLang: withLang);
   }
 
-  /// POST JSON 请求（tag_block 等专用）。
+  /// POST JSON 请求。
   Future<JmResponse> postJson(String path, Object payload) async {
     await _ensureReady();
+    final t = JmCrypto.randomToken();
+    _lastTs = t.ts;
     return _do('POST', path,
-        body: json.encode(payload), contentType: 'application/json');
+        body: jsonEncode(payload), contentType: 'application/json');
   }
 
-  /// 图片下载（带 Token 鉴权头；登录后附带 AVS Cookie）。
-  Future<List<int>> fetchImage(String rawUrl,
-      [Map<String, dynamic> params = const <String, dynamic>{}]) async {
+  /// `/chapter_view_template` 请求（特殊签名，对齐 qt GetHeader2）。
+  Future<JmResponse> getScramble(String epsId) async {
     await _ensureReady();
-    var url = Uri.parse(_fullUrl(rawUrl));
-    if (params.isNotEmpty) {
-      final q = Map<String, String>.from(url.queryParameters);
-      q.addAll(_buildQuery(params));
-      url = url.replace(queryParameters: q);
-    }
-    final resp = await _http
-        .get(url, headers: _headers().headers)
-        .timeout(const Duration(seconds: 30));
-    if (resp.statusCode != 200) {
-      throw JmHttpException(resp.statusCode, '图片下载失败: $rawUrl');
-    }
-    return resp.bodyBytes;
+    final url = _apiUrl('chapter_view_template', <String, dynamic>{
+      'id': epsId,
+      'mode': 'vertical',
+      'page': '0',
+      'app_img_shunt': 'NaN',
+    });
+    final resp = await _send('GET', Uri.parse(url),
+        headers: _scrambleHeaders());
+    if (resp == null) throw JmHttpException(0, 'scramble 请求失败');
+    final body = await _readText(resp);
+    // 该接口返回 HTML（var scramble_id = NNNN;），不走加密信封
+    return JmResponse(code: 200, msg: '', data: body, raw: <String, dynamic>{});
   }
 
-  /// 首次使用前确保主机已解析。
+  /// Web 端 GET（注册/验证码等，Web 域名）。
+  Future<({int status, String body, Map<String, String> cookies})> webGet(
+      String path,
+      {Map<String, String>? headers}) async {
+    await _ensureReady();
+    final url = path.startsWith('http')
+        ? Uri.parse(path)
+        : Uri.parse('${JmDomain.webUrl.value}$path');
+    final req = await _client.openUrl('GET', url);
+    _webHeaders().forEach((k, v) => req.headers.set(k, v));
+    headers?.forEach((k, v) => req.headers.set(k, v));
+    final resp = await req.close().timeout(const Duration(seconds: 20));
+    return (
+      status: resp.statusCode,
+      body: await _readText(resp),
+      cookies: _cookiesOf(resp),
+    );
+  }
+
+  /// Web 端 POST 表单（注册/找回等，Web 域名，对齐 qt RegisterReq 等）。
+  Future<({int status, String body, Map<String, String> cookies})> webPost(
+      String path, Map<String, dynamic> form,
+      {String? referer}) async {
+    await _ensureReady();
+    final url = path.startsWith('http')
+        ? Uri.parse(path)
+        : Uri.parse('${JmDomain.webUrl.value}$path');
+    final req = await _client.openUrl('POST', url);
+    _webHeaders(
+      contentType: 'application/x-www-form-urlencoded',
+      referer: referer ?? url.toString(),
+    ).forEach((k, v) => req.headers.set(k, v));
+    req.add(utf8.encode(buildQuery(form, withLang: false)));
+    final resp = await req.close().timeout(const Duration(seconds: 20));
+    return (
+      status: resp.statusCode,
+      body: await _readText(resp),
+      cookies: _cookiesOf(resp),
+    );
+  }
+
+  /// 图片下载（图片域名轮询 + 失败自动切换，对齐 qt DownloadBookReq）。
+  ///
+  /// [path] 形如 `/media/photos/{epsId}/{name}` 或完整 URL。
+  /// `_3x4` 封面失败时自动回退无后缀版本（对齐 qt resetUrl 逻辑）。
+  Future<List<int>> fetchImage(String rawUrl) async {
+    await _ensureReady();
+    final is3x4 = rawUrl.contains('_3x4');
+    final attemptMax = JmDomain.picUrlList.value.length;
+    Object? lastCause;
+
+    for (var attempt = 0; attempt < attemptMax; attempt++) {
+      var urlStr = rawUrl;
+      if (!urlStr.startsWith('http')) {
+        final base = imgHost;
+        urlStr = base.endsWith('/')
+            ? '$base${urlStr.substring(1)}'
+            : '$base$urlStr';
+      }
+      try {
+        if (enableDoh) await dohResolve(Uri.parse(urlStr).host);
+        final req =
+            await _client.openUrl('GET', Uri.parse(urlStr)).timeout(const Duration(seconds: 30));
+        final h = _apiHeaders();
+        h.remove('Content-Type');
+        h.forEach((k, v) => req.headers.set(k, v));
+        final resp = await req.close().timeout(const Duration(seconds: 30));
+        if (resp.statusCode == 200) {
+          final builder = BytesBuilder(copy: false);
+          await for (final chunk in resp) {
+            builder.add(chunk);
+          }
+          final bytes = builder.takeBytes();
+          // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则回源）
+          if (bytes.isNotEmpty && bytes.length < 3000 && !urlStr.contains('?')) {
+            continue;
+          }
+          return bytes;
+        }
+        await resp.drain<void>().catchError((_) {});
+        lastCause = 'HTTP ${resp.statusCode}';
+      } catch (e) {
+        lastCause = e;
+      }
+      // _3x4 封面失败 → 尝试无后缀原图
+      if (is3x4) {
+        final noSuffix = rawUrl.replaceAll('_3x4', '');
+        try {
+          final base = imgHost;
+          final u2 = noSuffix.startsWith('http')
+              ? noSuffix
+              : (base.endsWith('/')
+                  ? '$base${noSuffix.substring(1)}'
+                  : '$base$noSuffix');
+          final req = await _client
+              .openUrl('GET', Uri.parse(u2))
+              .timeout(const Duration(seconds: 30));
+          final h = _apiHeaders();
+          h.remove('Content-Type');
+          h.forEach((k, v) => req.headers.set(k, v));
+          final resp = await req.close().timeout(const Duration(seconds: 30));
+          if (resp.statusCode == 200) {
+            final builder = BytesBuilder(copy: false);
+            await for (final chunk in resp) {
+              builder.add(chunk);
+            }
+            return builder.takeBytes();
+          }
+          await resp.drain<void>().catchError((_) {});
+        } catch (_) {}
+      }
+      // 轮询下一个图片域名
+      final list = JmDomain.picUrlList.value;
+      if (list.isEmpty) break;
+      _imgRotate = (_imgRotate + 1) % list.length;
+      imgIndex = _imgRotate + 1;
+    }
+    throw JmHttpException(0, '图片下载失败: $rawUrl', lastCause);
+  }
+
+  /// 测速（对齐 qt SpeedTestPingReq：HEAD 请求计时）。
+  Future<int> pingHost(String host, {Duration timeout = const Duration(seconds: 5)}) async {
+    final sw = Stopwatch()..start();
+    try {
+      final uri = Uri.parse(host.startsWith('http') ? host : 'https://$host');
+      final req = await _client.openUrl('HEAD', uri).timeout(timeout);
+      final resp = await req.close().timeout(timeout);
+      await resp.drain<void>().catchError((_) {});
+      sw.stop();
+      return sw.elapsedMilliseconds;
+    } catch (_) {
+      return -1;
+    }
+  }
+
+  /// 首次使用前确保已初始化。
   Future<void> _ensureReady() async {
-    if (!_initialized) await init(language: lang);
+    if (!_initialized) {
+      await init(language: lang, doh: enableDoh);
+    }
   }
 
-  void dispose() => _http.close();
+  void dispose() {
+    _http?.close();
+    _http = null;
+  }
 }

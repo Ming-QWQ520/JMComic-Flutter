@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
+import '../../services/download_manager.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
+import 'album_comment_page.dart';
 
 /// 漫画详情页。
 class AlbumDetailPage extends StatefulWidget {
@@ -62,13 +64,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         _album = a;
         _loading = false;
       });
-      // 上报浏览历史（登录后）
-      final app = context.read<AppState>();
-      if (app.isLogged) {
-        try {
-          await _api.updateWatchList(_id);
-        } catch (_) {}
-      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -107,7 +102,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
     final a = _album!;
     try {
-      await _api.like({'aid': a.id.toString()});
+      // 点赞（对齐 jmcomic APP API like 端点）
+      await _api.miscPost('like', <String, dynamic>{
+        'aid': a.id.toString(),
+        'type': 'album',
+        'action': a.liked ? 'unlike' : 'like',
+      });
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(a.liked ? '已取消点赞' : '点赞成功')));
@@ -119,21 +119,29 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
   }
 
-  Future<void> _toggleTrack() async {
-    final app = context.read<AppState>();
-    if (!app.isLogged) {
-      _needLogin();
-      return;
-    }
+  /// 下载整本（对齐 qt download_all_view）。
+  Future<void> _downloadAll() async {
+    final a = _album;
+    if (a == null) return;
+    final messenger = ScaffoldMessenger.of(context);
     try {
-      await _api.sertrackPost(_album!.id.toString());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('追更状态已切换')));
+      if (a.series.isEmpty) {
+        await DownloadManager.instance.addEps(
+          albumId: a.id.toString(),
+          albumName: a.name,
+          epsId: a.id.toString(),
+          epsName: a.name,
+        );
+      } else {
+        await DownloadManager.instance.addAlbum(
+          albumId: a.id.toString(),
+          albumName: a.name,
+          series: a.series,
+        );
+      }
+      messenger.showSnackBar(const SnackBar(content: Text('已加入下载队列')));
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+      messenger.showSnackBar(SnackBar(content: Text('加入下载失败: $e')));
     }
   }
 
@@ -150,6 +158,19 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       'chapterId': chapterId.isEmpty ? _album!.id.toString() : chapterId,
       'title': _album!.name,
     });
+  }
+
+  void _openComments() {
+    final a = _album!;
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => AlbumCommentPage(
+          albumId: a.id.toString(),
+          albumName: a.name,
+        ),
+      ),
+    );
   }
 
   Future<void> _buyWithCoin() async {
@@ -170,30 +191,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
   }
 
-  Future<void> _showDownloadInfo() async {
-    try {
-      final data = await _api.getAlbumDownload(_album!.id.toString());
-      if (!mounted) return;
-      showDialog<void>(
-        context: context,
-        builder: (BuildContext c) => AlertDialog(
-          title: const Text('下载包信息'),
-          content: SingleChildScrollView(child: Text(data?.toString() ?? '无')),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('关闭'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('获取失败: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -204,14 +201,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: <Widget>[
           IconButton(
-            tooltip: '追更',
-            icon: const Icon(Icons.notifications_active_outlined),
-            onPressed: _album == null ? null : _toggleTrack,
+            tooltip: '评论',
+            icon: const Icon(Icons.comment_outlined),
+            onPressed: _album == null ? null : _openComments,
           ),
           IconButton(
-            tooltip: '下载包信息',
-            icon: const Icon(Icons.download_outlined),
-            onPressed: _album == null ? null : _showDownloadInfo,
+            tooltip: '下载全部章节',
+            icon: const Icon(Icons.download_rounded),
+            onPressed: _album == null ? null : _downloadAll,
           ),
           IconButton(
             tooltip: 'J 币购买',

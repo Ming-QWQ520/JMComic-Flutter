@@ -3,6 +3,7 @@ name: Android CI
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   workflow_dispatch:
 
 jobs:
@@ -26,6 +27,15 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Setup Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
       - name: Pub get
         run: flutter pub get
 
@@ -35,17 +45,31 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Build APK (release)
-        run: flutter build apk --release
+      - name: Build APKs (release, split per ABI)
+        run: flutter build apk --release --split-per-abi
 
-      - name: Rename APK
+      - name: Prepare artifacts
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk \
-             build/app/outputs/flutter-apk/JMComic-Flutter-v1.0.0.apk
+          VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d '+' -f 1)
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dist/JMComic-Flutter-v${VERSION}-armeabi-v7a.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   "dist/JMComic-Flutter-v${VERSION}-arm64-v8a.apk"
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk      "dist/JMComic-Flutter-v${VERSION}-x86_64.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk             "dist/JMComic-Flutter-v${VERSION}-universal.apk"
+          ls -la dist
 
-      - name: Upload APK artifact
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
           name: JMComic-Flutter-release-apk
-          path: build/app/outputs/flutter-apk/JMComic-Flutter-v1.0.0.apk
+          path: dist/*.apk
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

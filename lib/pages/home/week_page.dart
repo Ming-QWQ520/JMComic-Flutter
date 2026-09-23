@@ -5,7 +5,10 @@ import '../../core/protocol/models.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/feedback.dart';
 
-/// 每周更新页：按星期筛选连载。
+/// 每周更新页（对齐 qt WeekView）。
+///
+/// - GET week 拉取星期分类（categories: [{id, time}]）；
+/// - GET week/filter?id=&type= 按 manga/hanman/another 三个类型页签加载。
 class WeekPage extends StatefulWidget {
   const WeekPage({super.key});
 
@@ -13,19 +16,40 @@ class WeekPage extends StatefulWidget {
   State<WeekPage> createState() => _WeekPageState();
 }
 
-class _WeekPageState extends State<WeekPage> {
+class _WeekPageState extends State<WeekPage>
+    with SingleTickerProviderStateMixin {
   final JmApi _api = JmApi.instance;
-  List<dynamic> _days = <dynamic>[];
+  late final TabController _typeCtrl =
+      TabController(length: 3, vsync: this);
+
+  /// 星期分类（id + time 标题）。
+  final List<Map<String, String>> _days = <Map<String, String>>[];
   bool _loading = true;
   String _error = '';
-  int _selected = -1;
+  int _selected = 0;
   List<SearchAlbum> _albums = <SearchAlbum>[];
   bool _albumsLoading = false;
+
+  /// 类型页签（对齐 qt typeIndexDict）。
+  static const List<String> _types = <String>['manga', 'hanman', 'another'];
+  static const List<String> _typeLabels = <String>['漫画', '韩漫', '其他'];
 
   @override
   void initState() {
     super.initState();
     _load();
+    _typeCtrl.addListener(_onTypeChanged);
+  }
+
+  @override
+  void dispose() {
+    _typeCtrl.removeListener(_onTypeChanged);
+    _typeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onTypeChanged() {
+    if (!_typeCtrl.indexIsChanging) _select(_selected);
   }
 
   Future<void> _load() async {
@@ -35,15 +59,25 @@ class _WeekPageState extends State<WeekPage> {
     });
     try {
       final data = await _api.getWeek();
-      List days = const [];
+      final days = <Map<String, String>>[];
       if (data is Map) {
-        days = (data['list'] ?? data['weeks'] ?? data['data'] ?? []) as List;
-      } else if (data is List) {
-        days = data;
+        final cats = data['categories'];
+        if (cats is List) {
+          for (final v in cats) {
+            if (v is Map) {
+              days.add(<String, String>{
+                'id': '${v['id'] ?? ''}',
+                'time': '${v['time'] ?? v['title'] ?? v['name'] ?? ''}',
+              });
+            }
+          }
+        }
       }
       if (!mounted) return;
       setState(() {
-        _days = days;
+        _days
+          ..clear()
+          ..addAll(days);
         _loading = false;
       });
       if (days.isNotEmpty) _select(0);
@@ -61,21 +95,21 @@ class _WeekPageState extends State<WeekPage> {
       _selected = i;
       _albumsLoading = true;
     });
-    if (i < 0 || i >= _days.length) return;
-    final day = _days[i];
-    String slug = '';
-    if (day is Map) {
-      slug = (day['slug'] ?? day['id'] ?? '').toString();
+    if (i < 0 || i >= _days.length) {
+      if (mounted) setState(() => _albumsLoading = false);
+      return;
     }
-    if (slug.isEmpty) {
+    final id = _days[i]['id'] ?? '';
+    final type = _types[_typeCtrl.index];
+    if (id.isEmpty) {
       if (mounted) setState(() => _albumsLoading = false);
       return;
     }
     try {
-      final data = await _api.getWeekFilter({'week': slug});
+      final list = await _api.getWeekFilter(id, type);
       if (!mounted) return;
       setState(() {
-        _albums = SearchAlbum.listFrom(data);
+        _albums = list;
         _albumsLoading = false;
       });
     } catch (_) {
@@ -89,9 +123,16 @@ class _WeekPageState extends State<WeekPage> {
 
   @override
   Widget build(BuildContext context) {
-    final tt = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('每周更新')),
+      appBar: AppBar(
+        title: const Text('每周更新'),
+        bottom: TabBar(
+          controller: _typeCtrl,
+          tabs: _typeLabels
+              .map((String l) => Tab(text: l))
+              .toList(),
+        ),
+      ),
       body: _loading
           ? const LoadingView()
           : _error.isNotEmpty
@@ -108,35 +149,20 @@ class _WeekPageState extends State<WeekPage> {
                         itemCount: _days.length,
                         separatorBuilder: (_, _) => const SizedBox(width: 8),
                         itemBuilder: (_, i) {
-                          final day = _days[i];
-                          final label = day is Map
-                              ? (day['name'] ??
-                                      day['title'] ??
-                                      day['slug'] ??
-                                      '')
-                                  .toString()
-                              : day.toString();
+                          final label = _days[i]['time'] ?? '周${i + 1}';
                           final sel = i == _selected;
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            child: ChoiceChip(
-                              label: Text(label),
-                              labelStyle: TextStyle(
-                                fontSize: 13,
-                                fontWeight: sel
-                                    ? FontWeight.w700
-                                    : FontWeight.w500,
-                              ),
-                              selected: sel,
-                              onSelected: (_) => _select(i),
+                          return ChoiceChip(
+                            label: Text(label),
+                            labelStyle: TextStyle(
+                              fontSize: 13,
+                              fontWeight:
+                                  sel ? FontWeight.w700 : FontWeight.w500,
                             ),
+                            selected: sel,
+                            onSelected: (_) => _select(i),
                           );
                         },
                       ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
-                      child: SectionHeader(title: '本日更新'),
                     ),
                     Expanded(
                       child: _albumsLoading
@@ -162,12 +188,6 @@ class _WeekPageState extends State<WeekPage> {
                                   ),
                                 ),
                     ),
-                    Text(
-                      '数据来自 week / week-filter 接口',
-                      style: tt.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.outline),
-                    ),
-                    const SizedBox(height: 8),
                   ],
                 ),
     );

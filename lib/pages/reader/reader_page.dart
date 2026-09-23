@@ -50,7 +50,6 @@ class _ReaderPageState extends State<ReaderPage> {
 
   ReadDirection _direction = ReadDirection.vertical;
   bool _volumeKeys = true;
-  bool _express = false;
 
   @override
   void didChangeDependencies() {
@@ -66,7 +65,6 @@ class _ReaderPageState extends State<ReaderPage> {
       final app = context.read<AppState>();
       _direction = app.readDirection;
       _volumeKeys = app.volumeKeyPaging;
-      _express = app.express;
       _load();
       _setupNative();
     }
@@ -126,11 +124,18 @@ class _ReaderPageState extends State<ReaderPage> {
       _error = '';
     });
     try {
-      final read = await _api.getComicRead(_chapterId,
-          express: _express ? 'on' : 'off');
+      // 对齐 qt 阅读流程：comic_read 获取图片列表，scramble_id 优先从
+      // chapter_view_template 获取（特殊签名头），失败用响应内字段
+      final read = await _api.getComicRead(_chapterId);
+      var sid = 0;
+      try {
+        sid = await _api.getScrambleId(_chapterId);
+      } catch (_) {
+        sid = int.tryParse(read.scrambleId) ?? 220980;
+      }
+      if (sid == 0) sid = int.tryParse(read.scrambleId) ?? 0;
       if (!mounted) return;
       final aid = int.tryParse(_albumId) ?? 0;
-      final sid = int.tryParse(read.scrambleId) ?? 0;
       setState(() {
         _images = read.images;
         _scrambled = Scramble.needScramble(aid, sid);
@@ -180,8 +185,10 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   void _preload(int index) {
-    if (index >= _images.length) return;
-    _loadImage(index);
+    final n = context.read<AppState>().preLoad;
+    for (var i = index; i < index + n && i < _images.length; i++) {
+      _loadImage(i);
+    }
   }
 
   void _nextPage() {
@@ -294,7 +301,11 @@ class _ReaderPageState extends State<ReaderPage> {
       ),
       actions: <Widget>[
         IconButton(
-          tooltip: _direction == ReadDirection.vertical ? '当前: 上下翻页' : '当前: 左右翻页',
+          tooltip: switch (_direction) {
+            ReadDirection.vertical => '当前: 上下翻页',
+            ReadDirection.horizontal => '当前: 左右翻页',
+            ReadDirection.rightToLeft => '当前: 日漫(右到左)',
+          },
           icon: Icon(
             _direction == ReadDirection.vertical
                 ? Icons.swap_vert_rounded
@@ -302,9 +313,11 @@ class _ReaderPageState extends State<ReaderPage> {
           ),
           onPressed: () {
             final app = context.read<AppState>();
-            final d = _direction == ReadDirection.vertical
-                ? ReadDirection.horizontal
-                : ReadDirection.vertical;
+            final d = switch (_direction) {
+              ReadDirection.vertical => ReadDirection.horizontal,
+              ReadDirection.horizontal => ReadDirection.rightToLeft,
+              ReadDirection.rightToLeft => ReadDirection.vertical,
+            };
             setState(() => _direction = d);
             app.setReadDirection(d);
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -369,12 +382,14 @@ class _ReaderPageState extends State<ReaderPage> {
       return const Center(
           child: Text('无图片数据', style: TextStyle(color: Colors.white70)));
     }
-    final axis = _direction == ReadDirection.horizontal
-        ? Axis.horizontal
-        : Axis.vertical;
+    final rtl = _direction == ReadDirection.rightToLeft;
+    final axis = _direction == ReadDirection.vertical
+        ? Axis.vertical
+        : Axis.horizontal;
     return PageView.builder(
-      key: ValueKey<String>('axis-$axis'),
+      key: ValueKey<String>('axis-$axis-$rtl'),
       scrollDirection: axis,
+      reverse: rtl,
       controller: _pageCtrl,
       itemCount: _images.length,
       onPageChanged: (int i) {

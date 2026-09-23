@@ -3,33 +3,44 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:encrypt/encrypt.dart';
 
-/// JMComic 协议密钥与加解密工具。
+import 'jm_domain.dart';
+
+/// JMComic 协议密钥与加解密工具（还原自 tonquer/JMComic-qt + jmcomic 库标准实现）。
 ///
-/// 协议还原自 JMComic3 APP v2.1.8（参考 Ming-QWQ520/JMcomic-API 逆向实现）：
-/// - 请求头 Token / Tokenparam 签名；
-/// - 响应体 Base64(AES-256-ECB(PKCS7(JSON))) 解密；
-/// - 远程主机配置文件解密。
+/// - 请求头签名：token = MD5("{ts}18comicAPP")，tokenparam = "{ts},{HeaderVer}"；
+/// - `/chapter_view_template` 特殊：token 密钥改用 18comicAPPContent（否则 403）；
+/// - 响应体解密：Base64(AES-256-ECB(PKCS7(JSON)))，
+///   密钥 = MD5("{ts}185Hcomic3PAPP7R") 的 32 字节 hex 字符串 ASCII；
+/// - 远程主机配置文件 (newsvr-*.txt) AES 解密。
 class JmCrypto {
   JmCrypto._();
 
-  /// 与 APK 内置版本一致，参与 Tokenparam 构造。
-  static const String appVersion = '2.1.8';
+  /// Token 签名密钥（对齐 qt GetHeader）。
+  static const String tokenSecret = '18comicAPP';
 
-  /// Token 签名与普通接口响应解密密钥种子。
-  static const String tokenSecret = '185Hcomic3PAPP7R';
+  /// tokenparam 中的版本号（对齐 qt GlobalConfig.HeaderVer）。
+  static String get appVersion => JmDomain.headerVer.value;
 
-  /// 响应解密密钥第二候选。
-  static const String contentSecret = '18comicAPPContent';
+  /// `/chapter_view_template` 专用 token 密钥（对齐 qt GetHeader2）。
+  static const String scrambleTokenSecret = '18comicAPPContent';
+
+  /// 响应数据解密密钥种子（jmcomic 库 APP_DATA_SECRET）。
+  static const String dataSecret = '185Hcomic3PAPP7R';
 
   /// 远程主机配置文件 (newsvr-*.txt) 的 AES 解密种子。
   static const String hostSeed = 'diosfjckwpqpdfjkvnqQjsik';
 
-  /// APP WebView UA（服务端按 APP 流量识别）。
+  /// 移动端 UA（对齐 qt 默认 UA）。
   static const String userAgent =
-      'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 '
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+      'Mozilla/5.0 (Linux; Android 7.1.2; DT1901A Build/N2G47O; wv) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/86.0.4240.198 Mobile Safari/537.36';
 
-  /// 远程主机配置文件地址（APK 内置，按顺序尝试）。
+  /// Web 端 UA（注册/验证码等网页请求使用，对齐 qt GetWebHeader）。
+  static const String webUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43';
+
+  /// 远程主机配置文件地址（按顺序尝试）。
   static const List<String> hostConfigUrls = <String>[
     'https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt',
     'https://rup4a04-c01.tos-ap-southeast-1.bytepluses.com/newsvr-2025.txt',
@@ -38,7 +49,6 @@ class JmCrypto {
 
   /// APK 内置的兜底主机配置（加密 Base64）。
   /// 原文为 `{"Setting":[...],"Server":[...],"jm3_Server":[[host,線路名]...]}`。
-  /// 与线上 newsvr-2025.txt 同步，主机变更时需更新。
   static const String backupHostCode = 'X+bnzYIcwF6C7Rd3T7njPDNH08zsH9zyqCrrjCr7qcnHb1LsmIZGIHtrN'
       'VR/GiraHE6OuhvrxEzwciVvhdU0I9OYcmWTxF1K7fLfcwkn7kMQg2DZ2qpE7dKGkqKCmQ'
       'ijaSUOswxL1/p9pSVe/vRYEzbB5pfcAB6Yz/zVVIendBJK629QiqQndRXM9bijtZuYJt'
@@ -53,12 +63,20 @@ class JmCrypto {
   /// 生成签名三元组 (ts, tokenparam, token)。
   ///
   /// - ts: 秒级 unix 时间戳字符串
-  /// - tokenparam: "{ts},{appVersion}"
+  /// - tokenparam: "{ts},{HeaderVer}"
   /// - token: MD5("{ts}" + tokenSecret) 小写 hex
   static ({String ts, String tokenparam, String token}) randomToken() {
     final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
     final tokenparam = '$ts,$appVersion';
     final token = md5Hex(ts + tokenSecret);
+    return (ts: ts, tokenparam: tokenparam, token: token);
+  }
+
+  /// `/chapter_view_template` 专用签名（对齐 qt GetHeader2 / jmcomic 特殊逻辑）。
+  static ({String ts, String tokenparam, String token}) scrambleToken() {
+    final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+    final tokenparam = '$ts,$appVersion';
+    final token = md5Hex(ts + scrambleTokenSecret);
     return (ts: ts, tokenparam: tokenparam, token: token);
   }
 
@@ -74,29 +92,16 @@ class JmCrypto {
     }
   }
 
-  /// 解密接口响应 data 字段。
+  /// 解密接口响应 data 字段（对齐 qt ParseData → jmcomic decode_resp_data）。
   ///
-  /// [encrypted] 为 Base64 密文字符串；[ts] 为请求 Tokenparam 中的时间戳；
-  /// [isAd] 标记广告类接口（使用不带时间戳的固定密钥）。
-  /// 常规接口依次尝试 md5(ts+密钥) / md5(密钥) 两组密钥，
-  /// 解密成功且为合法 JSON 才返回。
-  static String? decryptData(String encrypted, String ts, bool isAd) {
-    final secrets = <String>[tokenSecret, contentSecret];
-    if (isAd) {
-      for (final s in secrets) {
-        final plain = decryptBase64Aes(encrypted, md5Hex(s));
-        if (plain != null && _looksJson(plain)) return plain;
-      }
-      return null;
-    }
-    for (final s in secrets) {
-      final plain = decryptBase64Aes(encrypted, md5Hex(ts + s));
-      if (plain != null && _looksJson(plain)) return plain;
-    }
-    for (final s in secrets) {
-      final plain = decryptBase64Aes(encrypted, md5Hex(s));
-      if (plain != null && _looksJson(plain)) return plain;
-    }
+  /// [encrypted] 为 Base64 密文字符串；[ts] 为请求 Tokenparam 中的时间戳。
+  /// 密钥 = MD5("{ts}185Hcomic3PAPP7R")；解密成功且为合法 JSON 才返回。
+  static String? decryptData(String encrypted, String ts) {
+    final plain = decryptBase64Aes(encrypted, md5Hex(ts + dataSecret));
+    if (plain != null && _looksJson(plain)) return plain;
+    // 兜底：固定密钥（无时间戳派生），兼容特殊响应
+    final fixed = decryptBase64Aes(encrypted, md5Hex(dataSecret));
+    if (fixed != null && _looksJson(fixed)) return fixed;
     return null;
   }
 

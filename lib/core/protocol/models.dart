@@ -289,10 +289,10 @@ class SearchData {
 
 // ---------- 会员 ----------
 
-/// login 接口响应。
+/// login 接口响应（字段对齐 qt ParseLogin2）。
 class LoginData {
   LoginData.fromMap(Map<String, dynamic> m)
-      : id = _s(m['id']),
+      : id = _s(m['uid'] ?? m['id']),
         username = _s(m['username']),
         email = _s(m['email']),
         photo = _s(m['photo']),
@@ -300,9 +300,15 @@ class LoginData {
         coin = _i(m['coin']),
         exp = _i(m['exp']),
         level = _i(m['level']),
+        levelName = _s(m['level_name']),
+        gender = _s(m['gender']),
+        albumFavorites = _i(m['album_favorites']),
+        albumFavoritesMax = _i(m['album_favorites_max']),
+        nextLevelExp = _i(m['nextLevelExp']),
         dayAdFree = _b(m['day_ad_free']),
-        jwtToken = _s(m['jwt_token'] ?? m['JWT_TOKEN']),
-        s = _s(m['s']);
+        jwtToken =
+            _s(m['jwttoken'] ?? m['jwt_token'] ?? m['JWT_TOKEN']),
+        s = _s(m['s'] ?? m['AVS']);
 
   final String id;
   final String username;
@@ -312,6 +318,21 @@ class LoginData {
   final int coin;
   final int exp;
   final int level;
+
+  /// 等级名称（对齐 qt level_name）。
+  final String levelName;
+
+  /// 性别（Male/Female）。
+  final String gender;
+
+  /// 已用收藏数。
+  final int albumFavorites;
+
+  /// 收藏上限。
+  final int albumFavoritesMax;
+
+  /// 下一级所需经验。
+  final int nextLevelExp;
   final bool dayAdFree;
   final String jwtToken;
 
@@ -319,7 +340,7 @@ class LoginData {
   final String s;
 
   Map<String, dynamic> toMap() => <String, dynamic>{
-        'id': id,
+        'uid': id,
         'username': username,
         'email': email,
         'photo': photo,
@@ -327,13 +348,130 @@ class LoginData {
         'coin': coin,
         'exp': exp,
         'level': level,
+        'level_name': levelName,
+        'gender': gender,
+        'album_favorites': albumFavorites,
+        'album_favorites_max': albumFavoritesMax,
+        'nextLevelExp': nextLevelExp,
         'day_ad_free': dayAdFree,
-        'jwt_token': jwtToken,
+        'jwttoken': jwtToken,
         's': s,
       };
 
   static LoginData? fromMapSafe(dynamic v) {
     if (v is! Map<String, dynamic>) return null;
     return LoginData.fromMap(v);
+  }
+}
+
+// ---------- 评论（对齐 qt ParseBookComment / CommentInfo） ----------
+
+/// 单条评论（含子评论）。
+class CommentInfo {
+  CommentInfo.fromMap(Map<String, dynamic> m)
+      : id = _s(m['CID']),
+        uid = _s(m['UID']),
+        levelName = _s(_m(m['expinfo'])['level_name']),
+        level = _i(_m(m['expinfo'])['level']),
+        username = _s(m['username']),
+        photo = _s(m['photo']),
+        content = _s(m['content']),
+        likes = _i(m['likes']),
+        addTime = _s(m['addtime']),
+        linkBookName = _s(m['name']),
+        linkBookId = _s(m['AID']),
+        replys = listOfMaps(m['replys']).map(CommentInfo.fromMap).toList();
+
+  final String id;
+  final String uid;
+  final String levelName;
+  final int level;
+  final String username;
+  final String photo;
+  final String content;
+  final int likes;
+  final String addTime;
+  final String linkBookName;
+  final String linkBookId;
+  final List<CommentInfo> replys;
+
+  /// 头像相对路径（默认头像返回空）。
+  String get headPath {
+    if (photo.isEmpty || photo.startsWith('nopic-')) return '';
+    return photo;
+  }
+
+  /// 按页序排序后的子评论列表。
+  List<CommentInfo> get subList => replys;
+}
+
+/// forum 接口响应（评论列表）。
+class CommentData {
+  CommentData.fromMap(Map<String, dynamic> m)
+      : total = _i(m['total']),
+        list = listOfMaps(m['list']).map(CommentInfo.fromMap).toList();
+
+  final int total;
+  final List<CommentInfo> list;
+
+  static CommentData empty() => CommentData.fromMap(<String, dynamic>{});
+}
+
+// ---------- 收藏（对齐 qt ParseFavoritesReq2 / FavoriteInfo） ----------
+
+/// 收藏夹。
+class FavoriteFolder {
+  FavoriteFolder.fromMap(Map<String, dynamic> m)
+      : fid = _s(m['FID'] ?? m['fid']),
+        name = _s(m['name']);
+
+  final String fid;
+  final String name;
+}
+
+/// favorite 接口响应。
+class FavoriteData {
+  FavoriteData.fromMap(Map<String, dynamic> m)
+      : total = _i(m['total']),
+        count = _i(m['count']),
+        bookList = SearchAlbum.listFrom(m['list']),
+        folders =
+            listOfMaps(m['folder_list']).map(FavoriteFolder.fromMap).toList();
+
+  final int total;
+  final int count;
+  final List<SearchAlbum> bookList;
+  final List<FavoriteFolder> folders;
+
+  static FavoriteData empty() => FavoriteData.fromMap(<String, dynamic>{});
+}
+
+// ---------- 首页分区（对齐 qt ParseIndex2 / IndexInfo） ----------
+
+/// 首页 promote 分区（一个分区含一组漫画）。
+class IndexBlock {
+  IndexBlock.fromMap(Map<String, dynamic> m)
+      : title = _s(m['title']),
+        id = _s(m['id']),
+        slug = _s(m['slug']),
+        type = _s(m['type']),
+        filterVal = _s(m['filter_val']),
+        bookList = SearchAlbum.listFrom(m['content']);
+
+  final String title;
+  final String id;
+  final String slug;
+  final String type;
+  final String filterVal;
+  final List<SearchAlbum> bookList;
+
+  static List<IndexBlock> listFrom(dynamic v) {
+    final out = <IndexBlock>[];
+    if (v is List) {
+      for (final item in v) {
+        if (item is Map<String, dynamic>) out.add(IndexBlock.fromMap(item));
+      }
+    }
+    return out;
   }
 }

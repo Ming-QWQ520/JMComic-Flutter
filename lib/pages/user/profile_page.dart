@@ -4,15 +4,16 @@ import 'package:provider/provider.dart';
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
 import '../../state/app_state.dart';
-import '../../widgets/album_card.dart';
 import '../../widgets/feedback.dart';
-import '../media/media_page.dart';
+import '../blogs/blogs_page.dart';
+import '../download/download_page.dart';
 import '../settings/settings_page.dart';
-import 'login_page.dart';
-import 'notifications_page.dart';
+import '../sign/sign_page.dart';
 import 'favorites_page.dart';
+import 'login_page.dart';
 
-/// 我的页面：登录态、收藏、历史、通知、任务、多媒体、设置入口。
+/// 我的页面（对齐 qt NavigationWidget 用户区）：登录态、收藏、历史、
+/// 下载管理、签到、深夜食堂、设置入口。
 class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
 
@@ -37,11 +38,14 @@ class ProfilePage extends StatelessWidget {
                   CircleAvatar(
                     radius: 30,
                     backgroundColor: cs.primary.withValues(alpha: 0.14),
-                    backgroundImage: user == null ||
-                            state.api.avatarUrl(user.photo).isEmpty
-                        ? null
-                        : NetworkImage(state.api.avatarUrl(user.photo)),
-                    child: user == null
+                    backgroundImage: user != null &&
+                            !user.photo.startsWith('nopic-') &&
+                            user.photo.isNotEmpty
+                        ? NetworkImage(state.api.avatarUrl(user.photo))
+                        : null,
+                    child: user == null ||
+                            user.photo.startsWith('nopic-') ||
+                            user.photo.isEmpty
                         ? Icon(Icons.person_rounded,
                             color: cs.primary, size: 30)
                         : null,
@@ -94,7 +98,14 @@ class ProfilePage extends StatelessWidget {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Lv.${user.level} · J币 ${user.coin} · 经验 ${user.exp}',
+                                '${user.levelName.isEmpty ? 'Lv.${user.level}' : user.levelName}'
+                                ' · J币 ${user.coin} · 经验 ${user.exp}',
+                                style: tt.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '收藏 ${user.albumFavorites}/${user.albumFavoritesMax}',
                                 style: tt.bodySmall?.copyWith(
                                     color: cs.onSurfaceVariant),
                               ),
@@ -120,9 +131,7 @@ class ProfilePage extends StatelessWidget {
                           ),
                         );
                         if (ok == true) {
-                          try {
-                            await state.api.logout();
-                          } catch (_) {}
+                          // 对齐 qt Logout：清除本地登录态
                           await state.clearUser();
                         }
                       } else {
@@ -142,38 +151,38 @@ class ProfilePage extends StatelessWidget {
           // ---------- 阅读服务 ----------
           SectionHeader(title: '阅读服务'),
           _group(context, <Widget>[
-            _tile(context, Icons.bookmark_rounded, '我的收藏', '收藏的漫画',
-                const Color(0xFF6C5CE7),
+            _tile(context, Icons.bookmark_rounded, '我的收藏', '收藏夹管理 / 收藏的漫画',
+                const Color(0xFFE91E63),
                 () => _pushLogged(context, const FavoritesPage())),
             _tile(context, Icons.history_rounded, '浏览历史', '最近看过的漫画',
-                const Color(0xFF00B894),
+                const Color(0xFF17A2B8),
                 () => _pushLogged(context, const HistoryPage())),
-            _tile(context, Icons.track_changes_rounded, '追更列表', '订阅的连载更新',
-                const Color(0xFFE67E22),
-                () => _pushLogged(context, const TrackListPage())),
+            _tile(context, Icons.download_rounded, '下载管理', '下载队列 / 本地书架 / 离线阅读',
+                const Color(0xFF4CAF50),
+                () => Navigator.push(context,
+                    MaterialPageRoute<void>(builder: (_) => const DownloadPage()))),
           ]),
           const SizedBox(height: 14),
           // ---------- 账号服务 ----------
           SectionHeader(title: '账号服务'),
           _group(context, <Widget>[
-            _tile(context, Icons.notifications_rounded, '通知中心', '系统与互动消息',
-                const Color(0xFFE74C3C),
-                () => _pushLogged(context, const NotificationsPage())),
-            _tile(context, Icons.emoji_events_rounded, '任务与签到',
-                '每日签到 / 任务 / J币', const Color(0xFFF1C40F),
-                () => _pushLogged(context, const TasksPage())),
+            _tile(context, Icons.emoji_events_rounded, '每日签到', '签到日历 / J币奖励',
+                const Color(0xFFFFC107),
+                () => _pushLogged(context, const SignPage())),
+            _tile(context, Icons.my_library_books_rounded, '我的评论', '发布的评论记录',
+                const Color(0xFF9B59B6),
+                () => _pushLogged(context, const MyCommentsPage())),
           ]),
           const SizedBox(height: 14),
           // ---------- 更多 ----------
           SectionHeader(title: '更多'),
           _group(context, <Widget>[
-            _tile(context, Icons.auto_stories_rounded, '多媒体中心',
-                '小说 / 游戏 / 视频 / 博客', const Color(0xFF9B59B6),
-                () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                        builder: (_) => const MediaPage()))),
-            _tile(context, Icons.settings_rounded, '设置', '主题 / 翻页 / 线路 / 语言',
+            _tile(context, Icons.restaurant_rounded, '深夜食堂', '专栏文章 / 随笔',
+                const Color(0xFFFF7B00),
+                () => Navigator.push(context,
+                    MaterialPageRoute<void>(builder: (_) => const BlogsPage()))),
+            _tile(context, Icons.settings_rounded, '设置',
+                '主题 / 线路 / DoH / 阅读设置',
                 const Color(0xFF64748B),
                 () => Navigator.push(
                     context,
@@ -236,16 +245,17 @@ class ProfilePage extends StatelessWidget {
   }
 }
 
-/// 追更列表页。
-class TrackListPage extends StatefulWidget {
-  const TrackListPage({super.key});
+/// 我的评论页（对齐 qt GetMyCommentReq2）。
+class MyCommentsPage extends StatefulWidget {
+  const MyCommentsPage({super.key});
 
   @override
-  State<TrackListPage> createState() => _TrackListPageState();
+  State<MyCommentsPage> createState() => _MyCommentsPageState();
 }
 
-class _TrackListPageState extends State<TrackListPage> {
-  List<SearchAlbum> _items = <SearchAlbum>[];
+class _MyCommentsPageState extends State<MyCommentsPage> {
+  final JmApi _api = JmApi.instance;
+  final List<CommentInfo> _items = <CommentInfo>[];
   bool _loading = true;
   String _error = '';
 
@@ -256,12 +266,18 @@ class _TrackListPageState extends State<TrackListPage> {
   }
 
   Future<void> _load() async {
-    setState(() => _loading = true);
+    final app = context.read<AppState>();
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
     try {
-      final list = await JmApi.instance.getTrackList(1);
+      final data = await _api.getMyComments(app.user!.id, page: 1);
       if (!mounted) return;
       setState(() {
-        _items = list;
+        _items
+          ..clear()
+          ..addAll(data.list);
         _loading = false;
       });
     } catch (e) {
@@ -275,30 +291,52 @@ class _TrackListPageState extends State<TrackListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('追更列表')),
+      appBar: AppBar(title: const Text('我的评论')),
       body: _loading
           ? const LoadingView()
           : _error.isNotEmpty
               ? ErrorView(message: _error, onRetry: _load)
               : _items.isEmpty
-                  ? const EmptyView(message: '暂无追更的连载')
-                  : GridView.builder(
-                      padding: const EdgeInsets.all(16),
-                      gridDelegate:
-                          const SliverGridDelegateWithMaxCrossAxisExtent(
-                        maxCrossAxisExtent: 160,
-                        mainAxisSpacing: 16,
-                        crossAxisSpacing: 12,
-                        childAspectRatio: 0.55,
-                      ),
+                  ? const EmptyView(message: '还没有发布过评论')
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(14),
                       itemCount: _items.length,
                       itemBuilder: (_, i) {
-                        final a = _items[i];
-                        return AlbumCard(
-                          album: a,
-                          onTap: () => Navigator.pushNamed(
-                              context, '/album', arguments: a),
+                        final c = _items[i];
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          child: ListTile(
+                            title: Text(
+                              c.linkBookName.isEmpty
+                                  ? c.content
+                                  : c.linkBookName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              c.linkBookName.isEmpty
+                                  ? '赞 ${c.likes}'
+                                  : c.content,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.bodySmall
+                                  ?.copyWith(color: cs.onSurfaceVariant),
+                            ),
+                            trailing: c.linkBookId.isNotEmpty
+                                ? Icon(Icons.chevron_right_rounded,
+                                    color: cs.onSurfaceVariant)
+                                : null,
+                            onTap: c.linkBookId.isNotEmpty
+                                ? () => Navigator.pushNamed(
+                                    context, '/album',
+                                    arguments: c.linkBookId)
+                                : null,
+                          ),
                         );
                       },
                     ),

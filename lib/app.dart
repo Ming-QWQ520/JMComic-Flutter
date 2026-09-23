@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'pages/album/album_detail_page.dart';
+import 'pages/download/local_reader_page.dart';
 import 'pages/home/week_page.dart';
 import 'pages/reader/reader_page.dart';
 import 'pages/search/search_page.dart';
@@ -17,11 +18,12 @@ class JmComicApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return Consumer<AppState>(
       builder: (BuildContext context, AppState state, _) {
+        final scheme = state.scheme;
         return MaterialApp(
           title: 'JMComic-Flutter',
-          theme: AppTheme.light(),
-          darkTheme: AppTheme.dark(),
-          themeMode: state.themeMode, // 默认跟随系统
+          theme: AppTheme.light(scheme),
+          darkTheme: AppTheme.dark(scheme),
+          themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
           debugShowCheckedModeBanner: false,
           supportedLocales: const <Locale>[
             Locale('zh', 'CN'),
@@ -34,6 +36,11 @@ class JmComicApp extends StatelessWidget {
               case '/reader':
                 return MaterialPageRoute<void>(
                   builder: (_) => const ReaderPage(),
+                  settings: settings,
+                );
+              case '/local_reader':
+                return MaterialPageRoute<void>(
+                  builder: (_) => const LocalReaderPage(),
                   settings: settings,
                 );
               case '/week':

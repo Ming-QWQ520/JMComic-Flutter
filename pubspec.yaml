@@ -22,6 +22,8 @@ dependencies:
   provider: ^6.1.2
   # 本地持久化（主题/登录态/设置）
   shared_preferences: ^2.5.3
+  # 下载目录（本地下载管理）
+  path_provider: ^2.1.4
   # 封面磁盘缓存
   cached_network_image: ^3.4.1
 
@@ -29,6 +31,11 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+
+# 锁定不依赖 jni 的 path_provider_android 实现，
+# 避免 Android 构建引入 NDK/CMake 原生编译链（纯 Kotlin 实现足够）。
+dependency_overrides:
+  path_provider_android: 2.2.17
 
 flutter:
   uses-material-design: true

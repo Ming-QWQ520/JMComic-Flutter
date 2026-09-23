@@ -36,6 +36,16 @@ class LocalStore {
     await p.setBool(key, value);
   }
 
+  Future<int> getInt(String key, [int def = 0]) async {
+    final p = await _db;
+    return p.getInt(key) ?? def;
+  }
+
+  Future<void> setInt(String key, int value) async {
+    final p = await _db;
+    await p.setInt(key, value);
+  }
+
   Future<void> remove(String key) async {
     final p = await _db;
     await p.remove(key);

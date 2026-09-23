@@ -176,11 +176,15 @@ class _CategoryListPageState extends State<CategoryListPage> {
   String _sub = '';
   String _order = 'mr';
 
+  /// 排序（对齐 qt GetSearchCategoryReq2：o = mr/mv/mv_m/mv_w/mv_t/mp/tf）。
   static const Map<String, String> _orders = <String, String>{
     'mr': '最新',
-    'mt': '最多浏览',
-    'tf': '最多喜欢',
-    't': '最新发布',
+    'mv': '总点击',
+    'mv_m': '月点击',
+    'mv_w': '周点击',
+    'mv_t': '日点击',
+    'mp': '最多图片',
+    'tf': '最多爱心',
   };
 
   final GlobalKey<AlbumGridState> _gridKey = GlobalKey<AlbumGridState>();
@@ -189,11 +193,13 @@ class _CategoryListPageState extends State<CategoryListPage> {
 
   Future<List<SearchAlbum>?> _fetch(int page) async {
     try {
-      return await JmApi.instance.getCategoriesFilter(
-        categorySub: _sub.isEmpty ? widget.category.slug : _sub,
-        page: page,
+      // 对齐 qt GetSearchCategoryReq2：c=分类 slug，o=排序
+      final r = await JmApi.instance.searchCategory(
+        _sub.isEmpty ? widget.category.slug : _sub,
+        page,
         order: _order,
       );
+      return r.content;
     } catch (_) {
       return null;
     }

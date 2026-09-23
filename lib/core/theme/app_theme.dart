@@ -2,28 +2,38 @@ import 'package:flutter/material.dart';
 
 import '../constants.dart';
 
-/// 应用主题（浅色 / 深色）。
+/// 应用主题（对齐 JMComic-qt 的 6 套 QSS 主题配色）。
 class AppTheme {
   AppTheme._();
 
-  static ThemeData light() => _build(Brightness.light);
+  /// 按方案构建浅色/深色主题。
+  static ThemeData light([ThemeScheme scheme = ThemeScheme.lightOrange]) =>
+      _build(scheme, Brightness.light);
 
-  static ThemeData dark() => _build(Brightness.dark);
+  /// 按方案构建深色主题。
+  static ThemeData dark([ThemeScheme scheme = ThemeScheme.darkOrange]) =>
+      _build(scheme, Brightness.dark);
 
-  static ThemeData _build(Brightness brightness) {
-    final isDark = brightness == Brightness.dark;
-    final ColorScheme scheme = ColorScheme.fromSeed(
-      seedColor: Brand.primary,
-      brightness: brightness,
+  /// 按方案 + 亮度构建（方案亮度与请求亮度不一致时以方案亮度为主）。
+  static ThemeData of(ThemeScheme scheme) =>
+      _build(scheme, scheme.isDark ? Brightness.dark : Brightness.light);
+
+  static ThemeData _build(ThemeScheme scheme, Brightness brightness) {
+    final c = SchemeColors.of(scheme);
+    final isDark = c.isDark;
+    final ColorScheme colorScheme = ColorScheme.fromSeed(
+      seedColor: c.primary,
+      brightness: isDark ? Brightness.dark : Brightness.light,
     ).copyWith(
-      secondary: Brand.accent,
-      surface: isDark ? Brand.darkSurface : Colors.white,
+      primary: c.primary,
+      secondary: c.primary,
+      surface: c.surface,
     );
 
     final base = ThemeData(
       useMaterial3: true,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: isDark ? Brand.darkBg : Brand.lightBg,
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: c.bg,
       splashFactory: InkSparkle.splashFactory,
     );
 
@@ -32,23 +42,23 @@ class AppTheme {
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: isDark ? Brand.darkBg : Brand.lightBg,
-        foregroundColor: scheme.onSurface,
+        backgroundColor: c.bg,
+        foregroundColor: isDark ? Colors.white : const Color(0xFF555555),
         titleTextStyle: TextStyle(
           fontSize: 19,
           fontWeight: FontWeight.w700,
-          color: scheme.onSurface,
+          color: isDark ? Colors.white : const Color(0xFF555555),
           letterSpacing: -0.2,
         ),
       ),
       cardTheme: CardThemeData(
         elevation: 0,
-        color: scheme.surface,
+        color: c.surface,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
           side: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
             width: 0.8,
           ),
         ),
@@ -56,14 +66,14 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
         elevation: 0,
-        backgroundColor: isDark ? Brand.darkSurface : Colors.white,
-        indicatorColor: scheme.primary.withValues(alpha: 0.16),
+        backgroundColor: c.surface,
+        indicatorColor: c.primary.withValues(alpha: 0.16),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 24,
-            color: selected ? scheme.primary : scheme.onSurfaceVariant,
+            color: selected ? c.primary : colorScheme.onSurfaceVariant,
           );
         }),
       ),
@@ -71,10 +81,12 @@ class AppTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dims.radiusS),
         ),
-        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+        side: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
+          backgroundColor: c.primary,
+          foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(Dims.radiusM),
           ),
@@ -83,28 +95,28 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? Brand.darkSurface : Colors.white,
+        fillColor: c.surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
           borderSide: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
           ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
           borderSide: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            color: colorScheme.outlineVariant.withValues(alpha: 0.5),
           ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
-          borderSide: BorderSide(color: scheme.primary, width: 1.4),
+          borderSide: BorderSide(color: c.primary, width: 1.4),
         ),
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
       dividerTheme: DividerThemeData(
-        color: scheme.outlineVariant.withValues(alpha: 0.4),
+        color: colorScheme.outlineVariant.withValues(alpha: 0.4),
         thickness: 0.6,
         space: 0.6,
       ),

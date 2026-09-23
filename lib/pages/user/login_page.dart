@@ -4,7 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/protocol/jm_api.dart';
 import '../../state/app_state.dart';
 
-/// 登录页。
+/// 登录页（对齐 qt LoginReq2：POST /login）。
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -127,7 +127,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 }
 
-/// 注册 / 找回密码页。
+/// 注册 / 找回密码页（对齐 qt RegisterReq / RegisterVerifyMailReq /
+/// ResetPasswordReq，走 Web 域名）。
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -138,44 +139,94 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _user = TextEditingController();
   final TextEditingController _pass = TextEditingController();
+  final TextEditingController _pass2 = TextEditingController();
   final TextEditingController _email = TextEditingController();
-  final TextEditingController _birthday = TextEditingController();
+  String _gender = 'Male';
   bool _loading = false;
 
   @override
   void dispose() {
     _user.dispose();
     _pass.dispose();
+    _pass2.dispose();
     _email.dispose();
-    _birthday.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
     final u = _user.text.trim();
     final p = _pass.text;
+    final p2 = _pass2.text;
     final e = _email.text.trim();
     if (u.isEmpty || p.isEmpty || e.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('请填写用户名、密码和邮箱')));
       return;
     }
+    if (p != p2) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('两次密码不一致')));
+      return;
+    }
     setState(() => _loading = true);
     try {
-      await JmApi.instance.register(<String, dynamic>{
-        'username': u,
-        'password': p,
-        'email': e,
-        if (_birthday.text.isNotEmpty) 'birthday': _birthday.text,
-      });
+      final (ok, msg) =
+          await JmApi.instance.register(u, e, p, p2, sex: _gender);
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('注册成功，请登录')));
-      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok ? '注册成功，请登录' : '注册失败: $msg')));
+      if (ok) Navigator.pop(context);
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('注册失败: $err')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// 重新发送验证邮件（对齐 RegisterVerifyMailReq）。
+  Future<void> _resendMail() async {
+    final u = _user.text.trim();
+    final p = _pass.text;
+    if (u.isEmpty || p.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先填写用户名和密码')));
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final (ok, msg) = await JmApi.instance.registerVerifyMail(u, p);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(ok ? '验证邮件已发送' : msg)));
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('发送失败: $err')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// 找回密码（对齐 ResetPasswordReq）。
+  Future<void> _forgot() async {
+    final e = _email.text.trim();
+    if (e.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请先填写邮箱')));
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final (ok, msg) = await JmApi.instance.resetPassword(e);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok ? '找回邮件已发送，请查收' : '发送失败: $msg')));
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('发送失败: $err')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -200,15 +251,38 @@ class _RegisterPageState extends State<RegisterPage> {
           ),
           const SizedBox(height: 14),
           TextField(
+            controller: _pass2,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: '确认密码'),
+          ),
+          const SizedBox(height: 14),
+          TextField(
             controller: _email,
             keyboardType: TextInputType.emailAddress,
             decoration: const InputDecoration(labelText: '邮箱'),
           ),
           const SizedBox(height: 14),
-          TextField(
-            controller: _birthday,
-            decoration:
-                const InputDecoration(labelText: '生日（选填，如 2000-01-01）'),
+          // 性别选择（对齐 qt RegisterReq sex 参数）
+          Row(
+            children: <Widget>[
+              const Text('性别'),
+              const SizedBox(width: 16),
+              Expanded(
+                child: SegmentedButton<String>(
+                  segments: const <ButtonSegment<String>>[
+                    ButtonSegment<String>(
+                        value: 'Male', label: Text('男'), icon: Icon(Icons.male)),
+                    ButtonSegment<String>(
+                        value: 'Female',
+                        label: Text('女'),
+                        icon: Icon(Icons.female)),
+                  ],
+                  selected: <String>{_gender},
+                  onSelectionChanged: (Set<String> s) =>
+                      setState(() => _gender = s.first),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 22),
           FilledButton(
@@ -225,24 +299,11 @@ class _RegisterPageState extends State<RegisterPage> {
           ),
           const SizedBox(height: 10),
           TextButton(
-            onPressed: () async {
-              final e = _email.text.trim();
-              if (e.isEmpty) {
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(const SnackBar(content: Text('请先填写邮箱')));
-                return;
-              }
-              try {
-                await JmApi.instance.forgot(<String, dynamic>{'email': e});
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('找回邮件已发送，请查收')));
-              } catch (err) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context)
-                    .showSnackBar(SnackBar(content: Text('发送失败: $err')));
-              }
-            },
+            onPressed: _loading ? null : _resendMail,
+            child: const Text('重新发送验证邮件'),
+          ),
+          TextButton(
+            onPressed: _loading ? null : _forgot,
             child: const Text('使用上方邮箱找回密码'),
           ),
         ],
