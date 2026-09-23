@@ -392,15 +392,6 @@ class JmClient {
     return parts.join('&');
   }
 
-  /// URL 构造（对齐 qt：GET 带 query 时为 `{path}/?{query}`，POST 为 `{path}`）。
-  String _apiUrl(
-    String path,
-    Map<String, dynamic> params, {
-    bool withLang = true,
-  }) {
-    return _apiUrlWithHost(apiHost, path, params, withLang: withLang);
-  }
-
   /// 指定主机的 URL 构造（与 qt 逐字对齐：`{host}/{path}/?{query}`）。
   String _apiUrlWithHost(
     String host,
