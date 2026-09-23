@@ -5,6 +5,9 @@ import 'package:encrypt/encrypt.dart';
 
 import 'jm_domain.dart';
 
+/// 请求签名三元组（randomToken / scrambleToken 的返回类型）。
+typedef JmCryptoToken = ({String ts, String tokenparam, String token});
+
 /// JMComic 协议密钥与加解密工具（还原自 tonquer/JMComic-qt + jmcomic 库标准实现）。
 ///
 /// - 请求头签名：token = MD5("{ts}18comicAPP")，tokenparam = "{ts},{HeaderVer}"；
@@ -40,6 +43,9 @@ class JmCrypto {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.43';
 
+  /// API 请求头 version 字段（对齐 qt config.UpdateVersion）。
+  static const String clientVersion = 'v1.3.6';
+
   /// 远程主机配置文件地址（按顺序尝试）。
   static const List<String> hostConfigUrls = <String>[
     'https://rup4a04-c02.tos-cn-hongkong.bytepluses.com/newsvr-2025.txt',
@@ -49,7 +55,8 @@ class JmCrypto {
 
   /// APK 内置的兜底主机配置（加密 Base64）。
   /// 原文为 `{"Setting":[...],"Server":[...],"jm3_Server":[[host,線路名]...]}`。
-  static const String backupHostCode = 'X+bnzYIcwF6C7Rd3T7njPDNH08zsH9zyqCrrjCr7qcnHb1LsmIZGIHtrN'
+  static const String backupHostCode =
+      'X+bnzYIcwF6C7Rd3T7njPDNH08zsH9zyqCrrjCr7qcnHb1LsmIZGIHtrN'
       'VR/GiraHE6OuhvrxEzwciVvhdU0I9OYcmWTxF1K7fLfcwkn7kMQg2DZ2qpE7dKGkqKCmQ'
       'ijaSUOswxL1/p9pSVe/vRYEzbB5pfcAB6Yz/zVVIendBJK629QiqQndRXM9bijtZuYJt'
       'Kw3YBAA26a+fy06dNszfw9v/4R8akVaSTWLOJc0nJy+9vm2t2W997vcqFL91iklKuKVE'
@@ -65,7 +72,7 @@ class JmCrypto {
   /// - ts: 秒级 unix 时间戳字符串
   /// - tokenparam: "{ts},{HeaderVer}"
   /// - token: MD5("{ts}" + tokenSecret) 小写 hex
-  static ({String ts, String tokenparam, String token}) randomToken() {
+  static JmCryptoToken randomToken() {
     final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
     final tokenparam = '$ts,$appVersion';
     final token = md5Hex(ts + tokenSecret);
@@ -73,7 +80,7 @@ class JmCrypto {
   }
 
   /// `/chapter_view_template` 专用签名（对齐 qt GetHeader2 / jmcomic 特殊逻辑）。
-  static ({String ts, String tokenparam, String token}) scrambleToken() {
+  static JmCryptoToken scrambleToken() {
     final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
     final tokenparam = '$ts,$appVersion';
     final token = md5Hex(ts + scrambleTokenSecret);
@@ -84,8 +91,9 @@ class JmCrypto {
   static String? decryptBase64Aes(String b64, String keyHex) {
     try {
       final key = Key.fromUtf8(keyHex);
-      final encrypter =
-          Encrypter(AES(key, mode: AESMode.ecb, padding: 'PKCS7'));
+      final encrypter = Encrypter(
+        AES(key, mode: AESMode.ecb, padding: 'PKCS7'),
+      );
       return encrypter.decrypt(Encrypted.fromBase64(b64));
     } catch (_) {
       return null;

@@ -59,14 +59,15 @@ class JmHostConfig {
   });
 
   factory JmHostConfig.fromMap(Map<String, dynamic> m) => JmHostConfig(
-        setting: (m['Setting'] as List?)?.map((e) => e.toString()).toList() ??
-            <String>[],
-        server: (m['Server'] as List?)?.map((e) => e.toString()).toList() ??
-            <String>[],
-        jm3Server: ((m['jm3_Server'] as List?) ?? <dynamic>[])
-            .map((e) => (e as List).map((x) => x.toString()).toList())
-            .toList(),
-      );
+    setting:
+        (m['Setting'] as List?)?.map((e) => e.toString()).toList() ??
+        <String>[],
+    server:
+        (m['Server'] as List?)?.map((e) => e.toString()).toList() ?? <String>[],
+    jm3Server: ((m['jm3_Server'] as List?) ?? <dynamic>[])
+        .map((e) => (e as List).map((x) => x.toString()).toList())
+        .toList(),
+  );
 
   final List<String> setting;
   final List<String> server;
@@ -99,7 +100,10 @@ class JmClient {
 
   /// 自定义连接工厂：启用 DoH 时按解析出的 IP 直连。
   Future<ConnectionTask<Socket>> _connectionFactory(
-      Uri url, String? proxyHost, int? proxyPort) async {
+    Uri url,
+    String? proxyHost,
+    int? proxyPort,
+  ) async {
     var host = url.host;
     var port = url.port;
     if (proxyHost != null && proxyPort != null) {
@@ -263,7 +267,9 @@ class JmClient {
       try {
         final sep = dohUrl.contains('?') ? '&' : '?';
         final uri = Uri.parse('$dohUrl${sep}name=$host&type=A');
-        final req = await _client.openUrl('GET', uri).timeout(const Duration(seconds: 6));
+        final req = await _client
+            .openUrl('GET', uri)
+            .timeout(const Duration(seconds: 6));
         req.headers.set('accept', 'application/dns-json');
         final resp = await req.close().timeout(const Duration(seconds: 6));
         final body = await _readText(resp);
@@ -300,16 +306,26 @@ class JmClient {
 
   // ---------- 请求头 ----------
 
-  Map<String, String> _apiHeaders({String? contentType}) {
-    final t = JmCrypto.randomToken();
+  /// API 请求头（对齐 qt GetHeader）。
+  ///
+  /// ⚠签名三元组 [t] 必须与响应解密使用的 ts 是同一个值：
+  /// 服务端用请求头 tokenparam 中的 ts 派生 AES 密钥加密响应 data。
+  Map<String, String> _apiHeaders(JmCryptoToken t, {String? contentType}) {
     return <String, String>{
       'tokenparam': t.tokenparam,
       'token': t.token,
       'accept-encoding': 'gzip',
+      'version': JmCrypto.clientVersion,
       if (_jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
       if (_avs.isNotEmpty) 'cookie': 'AVS=$_avs',
-      'Content-Type': ?contentType,
+      if (contentType != null) 'Content-Type': contentType,
     };
+  }
+
+  /// 图片请求头（对齐 qt DownloadBookReq：仅 Accept-Encoding，
+  /// 不带 token/authorization，避免 CF 缓存 BYPASS 回源）。
+  Map<String, String> _imgHeaders() {
+    return <String, String>{'accept-encoding': 'identity'};
   }
 
   /// `/chapter_view_template` 专用签名头（对齐 qt GetHeader2）。
@@ -325,8 +341,7 @@ class JmClient {
 
   Map<String, String> _webHeaders({String? referer, String? contentType}) {
     return <String, String>{
-      'accept':
-          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+      'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
       'accept-encoding': 'gzip, deflate, br',
       'accept-language': 'zh-CN,zh;q=0.9',
       'upgrade-insecure-requests': '1',
@@ -353,13 +368,18 @@ class JmClient {
     return parts.join('&');
   }
 
-  String _apiUrl(String path, Map<String, dynamic> params, {bool withLang = true}) {
+  /// URL 构造（对齐 qt：GET 带 query 时为 `{path}/?{query}`，POST 为 `{path}`）。
+  String _apiUrl(
+    String path,
+    Map<String, dynamic> params, {
+    bool withLang = true,
+  }) {
     var base = apiHost;
     if (!base.endsWith('/')) base = '$base/';
     var p = path.startsWith('/') ? path.substring(1) : path;
     final query = buildQuery(params, withLang: withLang);
     var url = '$base$p';
-    if (query.isNotEmpty) url += '?$query';
+    if (query.isNotEmpty) url += '/?$query';
     return url;
   }
 
@@ -384,15 +404,21 @@ class JmClient {
 
     for (var attempt = 0; attempt < attemptMax; attempt++) {
       final urlStr = _apiUrl(path, params, withLang: withLang);
+      // 每次尝试生成一次签名；请求头与响应解密使用同一个 ts（对齐 qt：
+      // self.now 同时用于 GetHeader 与 ParseData，不可两次生成）。
+      final t = JmCrypto.randomToken();
       try {
         final resp = await _send(
           method,
           Uri.parse(urlStr),
-          headers: {..._apiHeaders(contentType: contentType), ...?extraHeaders},
+          headers: {
+            ..._apiHeaders(t, contentType: contentType),
+            ...?extraHeaders,
+          },
           body: body,
         );
         if (resp != null) {
-          return await _decryptResponse(resp);
+          return await _decryptResponse(resp, ts: t.ts);
         }
         lastCause = 'HTTP 错误';
       } on JmApiException {
@@ -455,7 +481,12 @@ class JmClient {
   }
 
   /// 解密响应信封 `{"code":..,"msg"/"errorMsg":..,"data":"<base64密文>"}`。
-  Future<JmResponse> _decryptResponse(HttpClientResponse resp) async {
+  ///
+  /// [ts] 为本次请求头 tokenparam 中的时间戳（服务端用它派生加密密钥）。
+  Future<JmResponse> _decryptResponse(
+    HttpClientResponse resp, {
+    required String ts,
+  }) async {
     final body = await _readText(resp);
     Map<String, dynamic> envelope;
     try {
@@ -470,8 +501,9 @@ class JmClient {
     }
 
     final code = (envelope['code'] as num?)?.toInt() ?? 0;
-    final msg = (envelope['msg'] ?? envelope['errorMsg'] ?? envelope['message'] ?? '')
-        .toString();
+    final msg =
+        (envelope['msg'] ?? envelope['errorMsg'] ?? envelope['message'] ?? '')
+            .toString();
     final data = envelope['data'];
 
     if (code != 200) {
@@ -479,42 +511,45 @@ class JmClient {
     }
     if (data == null) {
       return JmResponse(
-          code: code,
-          msg: msg,
-          data: null,
-          raw: envelope,
-          cookies: _cookiesOf(resp));
+        code: code,
+        msg: msg,
+        data: null,
+        raw: envelope,
+        cookies: _cookiesOf(resp),
+      );
     }
     // data 不是字符串 → 服务端直接返回明文
     if (data is! String) {
       return JmResponse(
-          code: code,
-          msg: msg,
-          data: data,
-          raw: envelope,
-          cookies: _cookiesOf(resp));
+        code: code,
+        msg: msg,
+        data: data,
+        raw: envelope,
+        cookies: _cookiesOf(resp),
+      );
     }
     if (data.isEmpty) {
       return JmResponse(
-          code: code,
-          msg: msg,
-          data: null,
-          raw: envelope,
-          cookies: _cookiesOf(resp));
+        code: code,
+        msg: msg,
+        data: null,
+        raw: envelope,
+        cookies: _cookiesOf(resp),
+      );
     }
 
-    final ts = _lastTs;
     final plain = JmCrypto.decryptData(data, ts);
     if (plain == null) {
       // 尝试明文解析（少数接口直接返回明文 JSON 字符串）
       try {
         final decoded = jsonDecode(data);
         return JmResponse(
-            code: code,
-            msg: msg,
-            data: decoded,
-            raw: envelope,
-            cookies: _cookiesOf(resp));
+          code: code,
+          msg: msg,
+          data: decoded,
+          raw: envelope,
+          cookies: _cookiesOf(resp),
+        );
       } on FormatException {
         throw JmHttpException(0, '响应解密失败');
       }
@@ -522,53 +557,56 @@ class JmClient {
     try {
       final decoded = jsonDecode(plain);
       return JmResponse(
-          code: code,
-          msg: msg,
-          data: decoded,
-          raw: envelope,
-          cookies: _cookiesOf(resp));
+        code: code,
+        msg: msg,
+        data: decoded,
+        raw: envelope,
+        cookies: _cookiesOf(resp),
+      );
     } on FormatException {
       throw JmHttpException(0, '解密后 JSON 解析失败');
     }
   }
 
-  /// 最近一次请求的时间戳（解密 data 用）。
-  String _lastTs = '';
-
   // ---------- Transport ----------
 
   /// GET API 请求。
-  Future<JmResponse> get(String path,
-      [Map<String, dynamic> params = const <String, dynamic>{},
-      bool withLang = true]) async {
+  Future<JmResponse> get(
+    String path, [
+    Map<String, dynamic> params = const <String, dynamic>{},
+    bool withLang = true,
+  ]) async {
     await _ensureReady();
-    final t = JmCrypto.randomToken();
-    _lastTs = t.ts;
     return _do('GET', path, params: params, withLang: withLang);
   }
 
   /// POST 表单 API 请求。
-  Future<JmResponse> postForm(String path,
-      [Map<String, dynamic> params = const <String, dynamic>{},
-      bool withLang = false]) async {
+  Future<JmResponse> postForm(
+    String path, [
+    Map<String, dynamic> params = const <String, dynamic>{},
+    bool withLang = false,
+  ]) async {
     await _ensureReady();
-    final t = JmCrypto.randomToken();
-    _lastTs = t.ts;
     final body = buildQuery(params, withLang: false);
-    return _do('POST', path,
-        params: const <String, dynamic>{},
-        body: body,
-        contentType: 'application/x-www-form-urlencoded',
-        withLang: withLang);
+    return _do(
+      'POST',
+      path,
+      params: const <String, dynamic>{},
+      body: body,
+      contentType: 'application/x-www-form-urlencoded',
+      withLang: withLang,
+    );
   }
 
   /// POST JSON 请求。
   Future<JmResponse> postJson(String path, Object payload) async {
     await _ensureReady();
-    final t = JmCrypto.randomToken();
-    _lastTs = t.ts;
-    return _do('POST', path,
-        body: jsonEncode(payload), contentType: 'application/json');
+    return _do(
+      'POST',
+      path,
+      body: jsonEncode(payload),
+      contentType: 'application/json',
+    );
   }
 
   /// `/chapter_view_template` 请求（特殊签名，对齐 qt GetHeader2）。
@@ -580,8 +618,11 @@ class JmClient {
       'page': '0',
       'app_img_shunt': 'NaN',
     });
-    final resp = await _send('GET', Uri.parse(url),
-        headers: _scrambleHeaders());
+    final resp = await _send(
+      'GET',
+      Uri.parse(url),
+      headers: _scrambleHeaders(),
+    );
     if (resp == null) throw JmHttpException(0, 'scramble 请求失败');
     final body = await _readText(resp);
     // 该接口返回 HTML（var scramble_id = NNNN;），不走加密信封
@@ -590,8 +631,9 @@ class JmClient {
 
   /// Web 端 GET（注册/验证码等，Web 域名）。
   Future<({int status, String body, Map<String, String> cookies})> webGet(
-      String path,
-      {Map<String, String>? headers}) async {
+    String path, {
+    Map<String, String>? headers,
+  }) async {
     await _ensureReady();
     final url = path.startsWith('http')
         ? Uri.parse(path)
@@ -609,8 +651,10 @@ class JmClient {
 
   /// Web 端 POST 表单（注册/找回等，Web 域名，对齐 qt RegisterReq 等）。
   Future<({int status, String body, Map<String, String> cookies})> webPost(
-      String path, Map<String, dynamic> form,
-      {String? referer}) async {
+    String path,
+    Map<String, dynamic> form, {
+    String? referer,
+  }) async {
     await _ensureReady();
     final url = path.startsWith('http')
         ? Uri.parse(path)
@@ -649,9 +693,10 @@ class JmClient {
       }
       try {
         if (enableDoh) await dohResolve(Uri.parse(urlStr).host);
-        final req =
-            await _client.openUrl('GET', Uri.parse(urlStr)).timeout(const Duration(seconds: 30));
-        final h = _apiHeaders();
+        final req = await _client
+            .openUrl('GET', Uri.parse(urlStr))
+            .timeout(const Duration(seconds: 30));
+        final h = _imgHeaders();
         h.remove('Content-Type');
         h.forEach((k, v) => req.headers.set(k, v));
         final resp = await req.close().timeout(const Duration(seconds: 30));
@@ -662,7 +707,9 @@ class JmClient {
           }
           final bytes = builder.takeBytes();
           // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则回源）
-          if (bytes.isNotEmpty && bytes.length < 3000 && !urlStr.contains('?')) {
+          if (bytes.isNotEmpty &&
+              bytes.length < 3000 &&
+              !urlStr.contains('?')) {
             continue;
           }
           return bytes;
@@ -680,12 +727,12 @@ class JmClient {
           final u2 = noSuffix.startsWith('http')
               ? noSuffix
               : (base.endsWith('/')
-                  ? '$base${noSuffix.substring(1)}'
-                  : '$base$noSuffix');
+                    ? '$base${noSuffix.substring(1)}'
+                    : '$base$noSuffix');
           final req = await _client
               .openUrl('GET', Uri.parse(u2))
               .timeout(const Duration(seconds: 30));
-          final h = _apiHeaders();
+          final h = _imgHeaders();
           h.remove('Content-Type');
           h.forEach((k, v) => req.headers.set(k, v));
           final resp = await req.close().timeout(const Duration(seconds: 30));
@@ -709,7 +756,10 @@ class JmClient {
   }
 
   /// 测速（对齐 qt SpeedTestPingReq：HEAD 请求计时）。
-  Future<int> pingHost(String host, {Duration timeout = const Duration(seconds: 5)}) async {
+  Future<int> pingHost(
+    String host, {
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
     final sw = Stopwatch()..start();
     try {
       final uri = Uri.parse(host.startsWith('http') ? host : 'https://$host');
