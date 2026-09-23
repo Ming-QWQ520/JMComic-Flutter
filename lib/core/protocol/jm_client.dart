@@ -308,7 +308,7 @@ class JmClient {
       'accept-encoding': 'gzip',
       if (_jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
       if (_avs.isNotEmpty) 'cookie': 'AVS=$_avs',
-      if (contentType != null) 'Content-Type': contentType,
+      'Content-Type': ?contentType,
     };
   }
 
@@ -331,8 +331,8 @@ class JmClient {
       'accept-language': 'zh-CN,zh;q=0.9',
       'upgrade-insecure-requests': '1',
       'user-agent': JmCrypto.webUserAgent,
-      if (contentType != null) 'content-type': contentType,
-      if (referer != null) 'referer': referer,
+      'content-type': ?contentType,
+      'referer': ?referer,
     };
   }
 
@@ -361,12 +361,6 @@ class JmClient {
     var url = '$base$p';
     if (query.isNotEmpty) url += '?$query';
     return url;
-  }
-
-  Map<String, dynamic> _withoutLang(Map<String, dynamic> params) {
-    final m = Map<String, dynamic>.from(params);
-    m.remove('lang');
-    return m;
   }
 
   // ---------- 核心请求 ----------

@@ -30,20 +30,22 @@ class SettingsPage extends StatelessWidget {
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
-              child: Column(
-                children: <Widget>[
-                  for (final s in ThemeScheme.values)
-                    RadioListTile<ThemeScheme>(
-                      value: s,
-                      groupValue: state.scheme,
-                      onChanged: (ThemeScheme? v) {
-                        if (v != null) state.setScheme(v);
-                      },
-                      title: Text(s.label),
-                      secondary: _colorDot(SchemeColors.of(s).primary),
-                      dense: true,
-                    ),
-                ],
+              child: RadioGroup<ThemeScheme>(
+                groupValue: state.scheme,
+                onChanged: (ThemeScheme? v) {
+                  if (v != null) state.setScheme(v);
+                },
+                child: Column(
+                  children: <Widget>[
+                    for (final s in ThemeScheme.values)
+                      RadioListTile<ThemeScheme>(
+                        value: s,
+                        title: Text(s.label),
+                        secondary: _colorDot(SchemeColors.of(s).primary),
+                        dense: true,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -58,27 +60,36 @@ class SettingsPage extends StatelessWidget {
                 children: <Widget>[
                   Text('API 线路', style: tt.titleSmall),
                   const SizedBox(height: 6),
-                  ..._apiOptions().map(
-                    (MapEntry<int, String> e) => RadioListTile<int>(
-                      value: e.key,
-                      groupValue: state.apiIndex,
-                      onChanged: (int? v) {
-                        if (v != null) state.setApiIndex(v);
-                      },
-                      title: Text(e.value),
-                      subtitle: state.speedResults[e.value] != null
-                          ? Text(
-                              state.speedResults[e.value]! < 0
-                                  ? '不可用'
-                                  : '${state.speedResults[e.value]} ms',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: (state.speedResults[e.value] ?? -1) < 0
-                                    ? cs.error
-                                    : Colors.green,
-                              ))
-                          : null,
-                      dense: true,
+                  RadioGroup<int>(
+                    groupValue: state.apiIndex,
+                    onChanged: (int? v) {
+                      if (v != null) state.setApiIndex(v);
+                    },
+                    child: Column(
+                      children: _apiOptions()
+                          .map(
+                            (MapEntry<int, String> e) => RadioListTile<int>(
+                              value: e.key,
+                              title: Text(e.value),
+                              subtitle:
+                                  state.speedResults[e.value] != null
+                                      ? Text(
+                                          state.speedResults[e.value]! < 0
+                                              ? '不可用'
+                                              : '${state.speedResults[e.value]} ms',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: (state.speedResults[e.value] ??
+                                                        -1) <
+                                                    0
+                                                ? cs.error
+                                                : Colors.green,
+                                          ))
+                                      : null,
+                              dense: true,
+                            ),
+                          )
+                          .toList(),
                     ),
                   ),
                   Align(
@@ -99,15 +110,21 @@ class SettingsPage extends StatelessWidget {
                   const Divider(),
                   Text('图片线路', style: tt.titleSmall),
                   const SizedBox(height: 6),
-                  ..._imgOptions().map(
-                    (MapEntry<int, String> e) => RadioListTile<int>(
-                      value: e.key,
-                      groupValue: state.imgIndex,
-                      onChanged: (int? v) {
-                        if (v != null) state.setImgIndex(v);
-                      },
-                      title: Text(e.value),
-                      dense: true,
+                  RadioGroup<int>(
+                    groupValue: state.imgIndex,
+                    onChanged: (int? v) {
+                      if (v != null) state.setImgIndex(v);
+                    },
+                    child: Column(
+                      children: _imgOptions()
+                          .map(
+                            (MapEntry<int, String> e) => RadioListTile<int>(
+                              value: e.key,
+                              title: Text(e.value),
+                              dense: true,
+                            ),
+                          )
+                          .toList(),
                     ),
                   ),
                 ],
@@ -130,17 +147,26 @@ class SettingsPage extends StatelessWidget {
                     dense: true,
                   ),
                   if (state.enableDoh)
-                    for (var i = 0; i < JmDomain.dohUrlList.value.length; i++)
-                      RadioListTile<int>(
-                        value: i + 1,
-                        groupValue: state.dohIndex + 1,
-                        onChanged: (int? v) {
-                          if (v != null) state.setDohIndex(v - 1);
-                        },
-                        title: Text(
-                            Uri.parse(JmDomain.dohUrlList.value[i]).host),
-                        dense: true,
+                    RadioGroup<int>(
+                      groupValue: state.dohIndex + 1,
+                      onChanged: (int? v) {
+                        if (v != null) state.setDohIndex(v - 1);
+                      },
+                      child: Column(
+                        children: <Widget>[
+                          for (var i = 0;
+                              i < JmDomain.dohUrlList.value.length;
+                              i++)
+                            RadioListTile<int>(
+                              value: i + 1,
+                              title: Text(Uri.parse(
+                                      JmDomain.dohUrlList.value[i])
+                                  .host),
+                              dense: true,
+                            ),
+                        ],
                       ),
+                    ),
                 ],
               ),
             ),
