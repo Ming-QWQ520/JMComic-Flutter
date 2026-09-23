@@ -79,9 +79,13 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     try {
       _scheme = ThemeScheme.fromKey(
-          await _store.getString('theme_scheme', 'light_orange'));
+        await _store.getString('theme_scheme', 'light_orange'),
+      );
       _volumeKeyPaging = await _store.getBool('volume_key_paging', true);
-      _readDirection = switch (await _store.getString('read_direction', 'vertical')) {
+      _readDirection = switch (await _store.getString(
+        'read_direction',
+        'vertical',
+      )) {
         'horizontal' => ReadDirection.horizontal,
         'rightToLeft' => ReadDirection.rightToLeft,
         _ => ReadDirection.vertical,
@@ -98,6 +102,14 @@ class AppState extends ChangeNotifier {
       final jwt = await _store.getString('jwt');
       final avs = await _store.getString('avs');
       _c.setAuth(jwt, avs);
+      // 服务端 401（token 过期）时同步清除 UI 登录态
+      _c.onAuthExpired = () {
+        _user = null;
+        _store.remove('jwt');
+        _store.remove('avs');
+        _store.remove('user');
+        notifyListeners();
+      };
       final userMap = await _store.getJson('user');
       if (userMap.isNotEmpty) {
         _user = LoginData.fromMapSafe(userMap);

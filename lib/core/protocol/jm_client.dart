@@ -168,6 +168,9 @@ class JmClient {
   String _avs = '';
   bool _initialized = false;
 
+  /// 登录态失效回调（服务端 401 时触发，供 UI 层同步清除用户状态）。
+  void Function()? onAuthExpired;
+
   String get jwt => _jwt;
   String get avs => _avs;
   bool get isLogged => _jwt.isNotEmpty;
@@ -310,14 +313,20 @@ class JmClient {
   ///
   /// ⚠签名三元组 [t] 必须与响应解密使用的 ts 是同一个值：
   /// 服务端用请求头 tokenparam 中的 ts 派生 AES 密钥加密响应 data。
-  Map<String, String> _apiHeaders(JmCryptoToken t, {String? contentType}) {
+  /// [auth] 为 false 时不携带登录态（对齐 qt LoginReq2 pop authorization：
+  /// 登录接口带过期 token 会被服务端拒绝）。
+  Map<String, String> _apiHeaders(
+    JmCryptoToken t, {
+    String? contentType,
+    bool auth = true,
+  }) {
     return <String, String>{
       'tokenparam': t.tokenparam,
       'token': t.token,
       'accept-encoding': 'gzip',
       'version': JmCrypto.clientVersion,
-      if (_jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
-      if (_avs.isNotEmpty) 'cookie': 'AVS=$_avs',
+      if (auth && _jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
+      if (auth && _avs.isNotEmpty) 'cookie': 'AVS=$_avs',
       if (contentType != null) 'Content-Type': contentType,
     };
   }
@@ -353,14 +362,16 @@ class JmClient {
 
   // ---------- URL 构造 ----------
 
-  /// 编码 query（过滤空值，自动补 lang，对齐 qt DictToUrl）。
+  /// 编码 query（保留空值参数，自动补 lang，严格对齐 qt DictToUrl：
+  /// qt 用 urlencode 生成 comicName=&skip= 等空参数，
+  /// 服务端某些接口要求这些键存在——与 qt 逐字对齐以消除差异）。
   String buildQuery(Map<String, dynamic> params, {bool withLang = true}) {
     final parts = <String>[];
     params.forEach((k, v) {
       if (v == null) return;
-      final s = v.toString();
-      if (s.isEmpty) return;
-      parts.add('${Uri.encodeComponent(k)}=${Uri.encodeComponent(s)}');
+      parts.add(
+        '${Uri.encodeComponent(k)}=${Uri.encodeComponent(v.toString())}',
+      );
     });
     if (withLang && lang.isNotEmpty && !params.containsKey('lang')) {
       parts.add('lang=${Uri.encodeComponent(lang)}');
@@ -396,10 +407,12 @@ class JmClient {
     String? body,
     String? contentType,
     bool withLang = true,
+    bool auth = true,
     Map<String, String>? extraHeaders,
   }) async {
     await _ensureReady();
     final attemptMax = JmDomain.apiUrlList.value.length;
+    final tried = <String>[];
     Object? lastCause;
 
     for (var attempt = 0; attempt < attemptMax; attempt++) {
@@ -412,21 +425,31 @@ class JmClient {
           method,
           Uri.parse(urlStr),
           headers: {
-            ..._apiHeaders(t, contentType: contentType),
+            ..._apiHeaders(t, contentType: contentType, auth: auth),
             ...?extraHeaders,
           },
           body: body,
         );
-        if (resp != null) {
-          return await _decryptResponse(resp, ts: t.ts);
-        }
-        lastCause = 'HTTP 错误';
+        return await _decryptResponse(resp, ts: t.ts);
       } on JmApiException {
+        // 业务错误（HTTP 200 但 code != 200），换域名无意义，直接抛给上层
         rethrow;
       } on JmHttpException catch (e) {
-        if (e.status == 401 || e.status == 400) rethrow;
+        // 对齐 qt：任意非 200（含 400/401/403/5xx）都切换下一域名重试。
+        // 不同地区/运营商解析到的 CDN 节点不同，部分节点 WAF 规则更严，
+        // 节点级的 400/403 换节点即可绕过。
+        tried.add('${Uri.parse(urlStr).host}=>${e.status}');
         lastCause = e;
+        if (e.status == 401 && auth && _jwt.isNotEmpty) {
+          // 登录态失效（token 过期）：清除旧 token，避免继续毒化后续请求
+          _jwt = '';
+          _avs = '';
+          try {
+            onAuthExpired?.call();
+          } catch (_) {}
+        }
       } catch (e) {
+        tried.add('${Uri.parse(urlStr).host}=>net');
         lastCause = e;
       }
       // 切换下一个 API 域名重试
@@ -434,11 +457,14 @@ class JmClient {
       if (list.isEmpty) break;
       apiIndex = apiIndex % list.length + 1;
     }
-    throw JmHttpException(0, '', lastCause);
+    throw JmHttpException(0, '全部线路失败 [${tried.join(', ')}]', lastCause);
   }
 
   /// 底层 HTTP 发送（支持 DoH 预解析）。
-  Future<HttpClientResponse?> _send(
+  ///
+  /// 任意非 2xx 状态码（含 400/401/403/5xx）都抛 JmHttpException，
+  /// 由 [_do] 统一切换域名重试（对齐 qt：所有非 Ok 状态都 ResetToSwitchNextUrl）。
+  Future<HttpClientResponse> _send(
     String method,
     Uri url, {
     Map<String, String> headers = const <String, String>{},
@@ -454,10 +480,7 @@ class JmClient {
     final resp = await req.close().timeout(timeout);
     if (resp.statusCode < 200 || resp.statusCode > 299) {
       await resp.drain<void>().catchError((_) {});
-      if (resp.statusCode == 401 || resp.statusCode == 400) {
-        throw JmHttpException(resp.statusCode);
-      }
-      return null; // 其它状态码 → 切换线路
+      throw JmHttpException(resp.statusCode);
     }
     return resp;
   }
@@ -575,16 +598,20 @@ class JmClient {
     String path, [
     Map<String, dynamic> params = const <String, dynamic>{},
     bool withLang = true,
+    bool auth = true,
   ]) async {
     await _ensureReady();
-    return _do('GET', path, params: params, withLang: withLang);
+    return _do('GET', path, params: params, withLang: withLang, auth: auth);
   }
 
   /// POST 表单 API 请求。
+  ///
+  /// [auth] 为 false 时不携带登录态（登录接口本身，对齐 qt LoginReq2）。
   Future<JmResponse> postForm(
     String path, [
     Map<String, dynamic> params = const <String, dynamic>{},
     bool withLang = false,
+    bool auth = true,
   ]) async {
     await _ensureReady();
     final body = buildQuery(params, withLang: false);
@@ -595,6 +622,7 @@ class JmClient {
       body: body,
       contentType: 'application/x-www-form-urlencoded',
       withLang: withLang,
+      auth: auth,
     );
   }
 
@@ -623,7 +651,6 @@ class JmClient {
       Uri.parse(url),
       headers: _scrambleHeaders(),
     );
-    if (resp == null) throw JmHttpException(0, 'scramble 请求失败');
     final body = await _readText(resp);
     // 该接口返回 HTML（var scramble_id = NNNN;），不走加密信封
     return JmResponse(code: 200, msg: '', data: body, raw: <String, dynamic>{});

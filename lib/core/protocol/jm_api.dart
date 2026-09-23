@@ -20,11 +20,15 @@ class JmApi {
   /// 登录。POST /login （对齐 LoginReq2）。
   ///
   /// 成功后从响应 Cookie 捕获 AVS，自动写入登录态。
+  /// 登录接口不携带旧登录态（对齐 qt LoginReq2 pop authorization，
+  /// 过期 token 附在登录请求上会被服务端拒绝）。
   Future<LoginData> login(String username, String password) async {
-    final r = await _c.postForm('login', <String, dynamic>{
-      'username': username,
-      'password': password,
-    });
+    final r = await _c.postForm(
+      'login',
+      <String, dynamic>{'username': username, 'password': password},
+      false,
+      false,
+    );
     final data = LoginData.fromMapSafe(r.data);
     if (data == null) throw JmApiException(0, '登录响应解析失败');
     final avs = r.cookies['AVS'] ?? '';
@@ -38,8 +42,13 @@ class JmApi {
   ///
   /// 返回 (是否成功, 消息)。
   Future<(bool, String)> register(
-      String userId, String email, String passwd, String passwd2,
-      {String sex = 'Male', String ver = ''}) async {
+    String userId,
+    String email,
+    String passwd,
+    String passwd2, {
+    String sex = 'Male',
+    String ver = '',
+  }) async {
     final r = await _c.webPost('/signup', <String, dynamic>{
       'username': userId,
       'password': passwd,
@@ -55,7 +64,10 @@ class JmApi {
   }
 
   /// 重新发送注册验证邮件（对齐 RegisterVerifyMailReq）。
-  Future<(bool, String)> registerVerifyMail(String user, String password) async {
+  Future<(bool, String)> registerVerifyMail(
+    String user,
+    String password,
+  ) async {
     final r = await _c.webPost('/confirm', <String, dynamic>{
       'username': user,
       'password': password,
@@ -75,10 +87,8 @@ class JmApi {
 
   /// 解析 Web 响应中的 toastr 消息（对齐 qt ParseMsg）。
   (bool, String) _parseWebMsg(String body, int status) {
-    final errRe =
-        RegExp(r"""toastr\['error'\]\("(.*?)"\)""");
-    final sucRe =
-        RegExp(r"""toastr\['success'\]\("(.*?)"\)""");
+    final errRe = RegExp(r"""toastr\['error'\]\("(.*?)"\)""");
+    final sucRe = RegExp(r"""toastr\['success'\]\("(.*?)"\)""");
     final suc = sucRe.firstMatch(body);
     if (suc != null) {
       return (true, suc.group(1) ?? '');
@@ -144,16 +154,20 @@ class JmApi {
   ///
   /// [searchType] = [site, work, author, tag, character]；
   /// [y]/[m] 年份/月份过滤。
-  Future<SearchData> searchComic(String keyword, int page,
-      {String order = 'mr',
-      String? searchType,
-      String? y,
-      String? m}) async {
+  Future<SearchData> searchComic(
+    String keyword,
+    int page, {
+    String order = 'mr',
+    String? searchType,
+    String? y,
+    String? m,
+  }) async {
     final r = await _c.get('search', <String, dynamic>{
       'search_query': keyword,
       'page': page,
       'o': order,
-      if (searchType != null && searchType.isNotEmpty) 'search_type': searchType,
+      if (searchType != null && searchType.isNotEmpty)
+        'search_type': searchType,
       if (y != null && y.isNotEmpty) 'y': y,
       if (m != null && m.isNotEmpty) 'm': m,
     });
@@ -170,8 +184,11 @@ class JmApi {
   ///
   /// [category] = 0/doujin/single/short/another/hanman/meiman/doujin_cosplay/3D；
   /// [order] = mr/mv/mv_m/mv_w/mv_t/mp/tf。
-  Future<SearchData> searchCategory(String category, int page,
-      {String order = 'mr'}) async {
+  Future<SearchData> searchCategory(
+    String category,
+    int page, {
+    String order = 'mr',
+  }) async {
     final r = await _c.get('categories/filter', <String, dynamic>{
       'page': page,
       'o': order,
@@ -206,8 +223,11 @@ class JmApi {
   /// 收藏列表。GET favorite （对齐 GetFavoritesReq2）。
   ///
   /// [order] = mr(收藏时间)/mp(更新时间)；[fid] 收藏夹 ID（0 默认）。
-  Future<FavoriteData> getFavoriteList(
-      {int page = 1, String order = 'mr', String fid = '0'}) async {
+  Future<FavoriteData> getFavoriteList({
+    int page = 1,
+    String order = 'mr',
+    String fid = '0',
+  }) async {
     final r = await _c.get('favorite', <String, dynamic>{
       'page': page,
       'folder_id': fid.isEmpty ? '0' : fid,
@@ -217,24 +237,34 @@ class JmApi {
   }
 
   /// 添加/取消收藏（切换）。POST favorite （对齐 AddAndDelFavoritesReq2）。
-  Future<dynamic> addFavorite(String aid) =>
-      _c.postForm('favorite', <String, dynamic>{'aid': aid}).then((r) => r.data);
+  Future<dynamic> addFavorite(String aid) => _c
+      .postForm('favorite', <String, dynamic>{'aid': aid})
+      .then((r) => r.data);
 
   /// 新建收藏夹。POST favorite_folder type=add （对齐 AddFavoritesFoldReq2）。
-  Future<dynamic> addFavoriteFolder(String name) =>
-      _c.postForm('favorite_folder',
-          <String, dynamic>{'folder_name': name, 'type': 'add'}).then((r) => r.data);
+  Future<dynamic> addFavoriteFolder(String name) => _c
+      .postForm('favorite_folder', <String, dynamic>{
+        'folder_name': name,
+        'type': 'add',
+      })
+      .then((r) => r.data);
 
   /// 删除收藏夹。POST favorite_folder type=del （对齐 DelFavoritesFoldReq2）。
-  Future<dynamic> delFavoriteFolder(String fid) =>
-      _c.postForm('favorite_folder',
-          <String, dynamic>{'folder_id': fid, 'type': 'del'}).then((r) => r.data);
+  Future<dynamic> delFavoriteFolder(String fid) => _c
+      .postForm('favorite_folder', <String, dynamic>{
+        'folder_id': fid,
+        'type': 'del',
+      })
+      .then((r) => r.data);
 
   /// 移动收藏到文件夹。POST favorite_folder type=move （对齐 MoveFavoritesFoldReq2）。
-  Future<dynamic> moveFavoriteFolder(String bookId, String fid) =>
-      _c.postForm('favorite_folder',
-          <String, dynamic>{'folder_id': fid, 'type': 'move', 'aid': bookId})
-              .then((r) => r.data);
+  Future<dynamic> moveFavoriteFolder(String bookId, String fid) => _c
+      .postForm('favorite_folder', <String, dynamic>{
+        'folder_id': fid,
+        'type': 'move',
+        'aid': bookId,
+      })
+      .then((r) => r.data);
 
   // ===================================================================
   // 评论（对齐 GetCommentReq2 / GetMyCommentReq2 / SendCommentReq2）
@@ -263,13 +293,17 @@ class JmApi {
   /// 发送评论。POST comment （对齐 SendCommentReq2）。
   ///
   /// [cid] 非空时为回复该评论。
-  Future<dynamic> sendComment(String bookId, String comment,
-          {String cid = ''}) =>
-      _c.postForm('comment', <String, dynamic>{
+  Future<dynamic> sendComment(
+    String bookId,
+    String comment, {
+    String cid = '',
+  }) => _c
+      .postForm('comment', <String, dynamic>{
         'comment': comment,
         'aid': bookId,
         if (cid.isNotEmpty) 'comment_id': cid,
-      }).then((r) => r.data);
+      })
+      .then((r) => r.data);
 
   // ===================================================================
   // 历史/购买/每周/连载/博客/签到
@@ -277,22 +311,27 @@ class JmApi {
 
   /// 观看历史。GET watch_list （对齐 GetHistoryReq2）。
   Future<List<SearchAlbum>> getWatchList(int page) async {
-    final r = await _c.get('watch_list', <String, dynamic>{'page': page}, false);
+    final r = await _c.get('watch_list', <String, dynamic>{
+      'page': page,
+    }, false);
     return SearchAlbum.listFrom(r.data);
   }
 
   /// J币购买漫画。POST coin_buy_comics （对齐 GetBuyComicsReq2）。
-  Future<dynamic> buyComicWithCoin(String bookId) =>
-      _c.postForm('coin_buy_comics', <String, dynamic>{'id': bookId})
-          .then((r) => r.data);
+  Future<dynamic> buyComicWithCoin(String bookId) => _c
+      .postForm('coin_buy_comics', <String, dynamic>{'id': bookId})
+      .then((r) => r.data);
 
   /// 每周推荐分类。GET week （对齐 GetWeekCategoriesReq2）。
   Future<dynamic> getWeek({int page = 0}) =>
       _c.get('week', <String, dynamic>{'page': page}).then((r) => r.data);
 
   /// 每周推荐筛选。GET week/filter （对齐 GetWeekFilterReq2）。
-  Future<List<SearchAlbum>> getWeekFilter(String id, String type,
-      {int page = 0}) async {
+  Future<List<SearchAlbum>> getWeekFilter(
+    String id,
+    String type, {
+    int page = 0,
+  }) async {
     final r = await _c.get('week/filter', <String, dynamic>{
       'page': page,
       'id': id,
@@ -302,46 +341,56 @@ class JmApi {
   }
 
   /// 每周连载。GET serialization （对齐 GetSerializationReq2）。
-  Future<dynamic> getSerialization(
-          {int date = 1, String type = 'all', int page = 1}) =>
-      _c.get('serialization', <String, dynamic>{
+  Future<dynamic> getSerialization({
+    int date = 1,
+    String type = 'all',
+    int page = 1,
+  }) => _c
+      .get('serialization', <String, dynamic>{
         'type': type,
         'date': date,
         'page': page,
-      }).then((r) => r.data);
+      })
+      .then((r) => r.data);
 
   /// 深夜食堂列表。GET blogs （对齐 GetBlogsReq2）。
-  Future<dynamic> getBlogs(
-          {String blogType = 'dinner', String searchQuery = '', int page = 1}) =>
-      _c.get('blogs', <String, dynamic>{
+  Future<dynamic> getBlogs({
+    String blogType = 'dinner',
+    String searchQuery = '',
+    int page = 1,
+  }) => _c
+      .get('blogs', <String, dynamic>{
         'blog_type': blogType,
         'page': page,
         'search_query': searchQuery,
-      }, false).then((r) => r.data);
+      }, false)
+      .then((r) => r.data);
 
   /// 深夜食堂详情。GET blog （对齐 GetBlogInfoReq2）。
   Future<dynamic> getBlogInfo(String id) =>
       _c.get('blog', <String, dynamic>{'id': id}, false).then((r) => r.data);
 
   /// 博客评论。GET forum?bid=&page=&mode=blog （对齐 GetBlogForumReq2）。
-  Future<dynamic> getBlogForum(String bid, {int page = 1}) =>
-      _c.get('forum', <String, dynamic>{
+  Future<dynamic> getBlogForum(String bid, {int page = 1}) => _c
+      .get('forum', <String, dynamic>{
         'bid': bid,
         'page': page,
         'mode': 'blog',
-      }, false).then((r) => r.data);
+      }, false)
+      .then((r) => r.data);
 
   /// 签到信息。GET daily?user_id= （对齐 GetDailyReq2）。
-  Future<dynamic> getDaily(String userId) =>
-      _c.get('daily', <String, dynamic>{'user_id': userId}, false)
-          .then((r) => r.data);
+  Future<dynamic> getDaily(String userId) => _c
+      .get('daily', <String, dynamic>{'user_id': userId}, false)
+      .then((r) => r.data);
 
   /// 每日签到。POST daily_chk （对齐 SignDailyReq2）。
-  Future<dynamic> signDaily(String userId, String dailyId) =>
-      _c.postForm('daily_chk', <String, dynamic>{
+  Future<dynamic> signDaily(String userId, String dailyId) => _c
+      .postForm('daily_chk', <String, dynamic>{
         'user_id': userId,
         'daily_id': dailyId,
-      }).then((r) => r.data);
+      })
+      .then((r) => r.data);
 
   // ===================================================================
   // 图片（对齐 DownloadBookReq）
@@ -362,7 +411,9 @@ class JmApi {
   String avatarUrl(String photo) {
     final host = _c.imgHost;
     if (host.isEmpty) return '';
-    final p = (photo.isEmpty || photo.startsWith('nopic-')) ? 'nopic-Male.gif' : photo;
+    final p = (photo.isEmpty || photo.startsWith('nopic-'))
+        ? 'nopic-Male.gif'
+        : photo;
     final slash = host.endsWith('/') ? '' : '/';
     return '$host${slash}media/users/$p';
   }
@@ -370,14 +421,16 @@ class JmApi {
   // ---------- 逃生舱（通用端点） ----------
 
   /// 通用 GET。
-  Future<JmResponse> miscGet(String path,
-          [Map<String, dynamic> params = const <String, dynamic>{}]) =>
-      _c.get(path, params);
+  Future<JmResponse> miscGet(
+    String path, [
+    Map<String, dynamic> params = const <String, dynamic>{},
+  ]) => _c.get(path, params);
 
   /// 通用 POST 表单。
-  Future<JmResponse> miscPost(String path,
-          [Map<String, dynamic> params = const <String, dynamic>{}]) =>
-      _c.postForm(path, params);
+  Future<JmResponse> miscPost(
+    String path, [
+    Map<String, dynamic> params = const <String, dynamic>{},
+  ]) => _c.postForm(path, params);
 
   /// 通用 POST JSON。
   Future<JmResponse> miscPostJson(String path, Object payload) =>
