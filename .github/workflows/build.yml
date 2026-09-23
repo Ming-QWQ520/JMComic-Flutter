@@ -45,8 +45,10 @@ jobs:
       - name: Test
         run: flutter test
 
-      - name: Build APKs (release, split per ABI)
-        run: flutter build apk --release --split-per-abi
+      - name: Build APKs (release, universal + split per ABI)
+        run: |
+          flutter build apk --release
+          flutter build apk --release --split-per-abi
 
       - name: Prepare artifacts
         run: |
