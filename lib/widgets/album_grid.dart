@@ -29,6 +29,9 @@ class AlbumGridState extends State<AlbumGrid> {
   bool _failed = false;
   bool _noMore = false;
 
+  /// 最近一次失败的具体原因（透传给用户，避免盲拆）。
+  Object? _lastError;
+
   @override
   void initState() {
     super.initState();
@@ -63,9 +66,13 @@ class AlbumGridState extends State<AlbumGrid> {
         if (list.isEmpty) _noMore = true;
         _items.addAll(list);
         _page++;
+        _lastError = null;
       }
-    } catch (_) {
+    } catch (e) {
+      // fetchPage 抛异常 → 记录真实错误并展示
+      _lastError = e;
       _failed = _items.isEmpty;
+      if (_items.isNotEmpty) _noMore = true;
     } finally {
       _loading = false;
       if (mounted) setState(() {});
@@ -79,6 +86,7 @@ class AlbumGridState extends State<AlbumGrid> {
     _loading = false;
     _failed = false;
     _noMore = false;
+    _lastError = null;
     if (mounted) setState(() {});
     _loadMore();
   }
@@ -95,10 +103,13 @@ class AlbumGridState extends State<AlbumGrid> {
       return const LoadingView();
     }
     if (_items.isEmpty && _failed) {
-      return ErrorView(onRetry: retry);
+      return ErrorView(error: _lastError, onRetry: retry);
     }
     if (_items.isEmpty && _noMore) {
-      return const EmptyView(message: '没有找到相关内容', icon: Icons.manage_search_rounded);
+      return const EmptyView(
+        message: '没有找到相关内容',
+        icon: Icons.manage_search_rounded,
+      );
     }
     return RefreshIndicator(
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -129,8 +140,7 @@ class AlbumGridState extends State<AlbumGrid> {
           final a = _items[i];
           return AlbumCard(
             album: a,
-            onTap: () =>
-                Navigator.pushNamed(context, '/album', arguments: a),
+            onTap: () => Navigator.pushNamed(context, '/album', arguments: a),
           );
         },
       ),

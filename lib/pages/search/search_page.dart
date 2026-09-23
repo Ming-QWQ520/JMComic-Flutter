@@ -27,7 +27,10 @@ class _SearchPageState extends State<SearchPage>
   final FocusNode _focus = FocusNode();
   AlbumGrid? _grid;
   String _keyword = '';
-  String _order = 'mr';
+  String _order = '';
+
+  /// 最近一次搜索的结果总数（服务端 total 字段）。
+  String _total = '';
 
   /// 搜索类型（对齐 qt GetSearchReq2 search_type）。
   String _searchType = '';
@@ -40,6 +43,28 @@ class _SearchPageState extends State<SearchPage>
     'character': '角色',
     'site': '站内',
   };
+
+  /// 热门搜索（点击即搜，对齐 qt 搜索页快捷标签）。
+  static const List<String> _hotKeywords = <String>[
+    '巨乳',
+    '姐姐',
+    '妹妹',
+    '人妻',
+    '校园',
+    '纯爱',
+    '女王',
+    '女仆',
+    '御姐',
+    '萝莉',
+    '办公室',
+    '后宫',
+    '束缚',
+    '教师',
+    '护士',
+    '巫女',
+    '触手',
+    '异世界',
+  ];
 
   @override
   bool get wantKeepAlive => true;
@@ -61,8 +86,7 @@ class _SearchPageState extends State<SearchPage>
   }
 
   /// 输入是否为纯数字（漫画编号）。
-  bool get _isNumericQuery =>
-      RegExp(r'^\d{1,12}$').hasMatch(_ctrl.text.trim());
+  bool get _isNumericQuery => RegExp(r'^\d{1,12}$').hasMatch(_ctrl.text.trim());
 
   Future<void> _search([String? kw]) async {
     final k = (kw ?? _ctrl.text).trim();
@@ -71,23 +95,31 @@ class _SearchPageState extends State<SearchPage>
     setState(() {
       _keyword = k;
       _ctrl.text = k;
+      _total = '';
       _grid = null; // 先重建 key，确保强制刷新
     });
     await context.read<AppState>().addSearchHistory(k);
     if (!mounted) return;
     setState(() {
-      _grid = AlbumGrid(key: ValueKey<String>('search-$k-$_order'), fetchPage: _fetch);
+      _grid = AlbumGrid(
+        key: ValueKey<String>('search-$k-$_order-$_searchType'),
+        fetchPage: _fetch,
+      );
     });
   }
 
   Future<List<SearchAlbum>?> _fetch(int page) async {
-    try {
-      final r = await JmApi.instance.searchComic(_keyword, page,
-          order: _order, searchType: _searchType);
-      return r.content;
-    } catch (_) {
-      return null;
+    // 异常直接抛给 AlbumGrid，展示真实错误详情
+    final r = await JmApi.instance.searchComic(
+      _keyword,
+      page,
+      order: _order,
+      searchType: _searchType,
+    );
+    if (mounted && page == 1) {
+      setState(() => _total = r.total);
     }
+    return r.content;
   }
 
   /// 编号直达：先查详情，成功后进入详情页。
@@ -100,9 +132,7 @@ class _SearchPageState extends State<SearchPage>
       if (album.id == 0) throw StateError('专辑不存在');
       navigator.pushNamed('/album', arguments: album.id.toString());
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('编号 $id 打开失败：$e')),
-      );
+      messenger.showSnackBar(SnackBar(content: Text('编号 $id 打开失败：$e')));
     }
   }
 
@@ -153,6 +183,27 @@ class _SearchPageState extends State<SearchPage>
           ? Column(
               children: [
                 if (_isNumericQuery) _buildIdJumpCard(cs, tt),
+                if (_total.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: Row(
+                      children: [
+                        Text(
+                          '「$_keyword」',
+                          style: tt.labelMedium?.copyWith(
+                            color: cs.primary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          '共 $_total 个结果',
+                          style: tt.labelMedium?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(child: _grid!),
               ],
             )
@@ -162,17 +213,38 @@ class _SearchPageState extends State<SearchPage>
                 // 编号直达入口
                 _buildIdJumpCard(cs, tt),
                 const SizedBox(height: 20),
+                // 热门搜索
+                SectionHeader(title: '热门搜索'),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _hotKeywords
+                      .map(
+                        (String h) => ActionChip(
+                          label: Text(h),
+                          labelStyle: const TextStyle(fontSize: 12.5),
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () {
+                            _ctrl.text = h;
+                            _search(h);
+                          },
+                        ),
+                      )
+                      .toList(),
+                ),
+                const SizedBox(height: 20),
                 // 搜索历史
                 if (state.searchHistory.isNotEmpty) ...[
                   Row(
                     children: [
-                      Expanded(
-                        child: SectionHeader(title: '搜索历史'),
-                      ),
+                      Expanded(child: SectionHeader(title: '搜索历史')),
                       IconButton(
                         tooltip: '清空历史',
-                        icon: Icon(Icons.delete_outline_rounded,
-                            size: 20, color: cs.onSurfaceVariant),
+                        icon: Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                          color: cs.onSurfaceVariant,
+                        ),
                         onPressed: () =>
                             context.read<AppState>().clearSearchHistory(),
                       ),
@@ -182,15 +254,17 @@ class _SearchPageState extends State<SearchPage>
                     spacing: 8,
                     runSpacing: 8,
                     children: state.searchHistory
-                        .map((String h) => ActionChip(
-                              label: Text(h),
-                              labelStyle: const TextStyle(fontSize: 12.5),
-                              visualDensity: VisualDensity.compact,
-                              onPressed: () {
-                                _ctrl.text = h;
-                                _search(h);
-                              },
-                            ))
+                        .map(
+                          (String h) => ActionChip(
+                            label: Text(h),
+                            labelStyle: const TextStyle(fontSize: 12.5),
+                            visualDensity: VisualDensity.compact,
+                            onPressed: () {
+                              _ctrl.text = h;
+                              _search(h);
+                            },
+                          ),
+                        )
                         .toList(),
                   ),
                   const SizedBox(height: 20),
@@ -201,21 +275,25 @@ class _SearchPageState extends State<SearchPage>
                   spacing: 8,
                   runSpacing: 8,
                   children: _searchTypes.entries
-                      .map((MapEntry<String, String> e) => ChoiceChip(
-                            label: Text(e.value),
-                            selected: _searchType == e.key,
-                            onSelected: (_) {
-                              setState(() => _searchType = e.key);
-                              if (_keyword.isNotEmpty) _search(_keyword);
-                            },
-                          ))
+                      .map(
+                        (MapEntry<String, String> e) => ChoiceChip(
+                          label: Text(e.value),
+                          selected: _searchType == e.key,
+                          onSelected: (_) {
+                            setState(() => _searchType = e.key);
+                            if (_keyword.isNotEmpty) _search(_keyword);
+                          },
+                        ),
+                      )
                       .toList(),
                 ),
                 const SizedBox(height: 24),
                 Text(
                   '小提示：输入纯数字编号可直达漫画详情页；\n支持「作者:名字 / 作品:名字」等搜索语法。',
                   style: tt.labelSmall?.copyWith(
-                      color: cs.onSurfaceVariant, height: 1.6),
+                    color: cs.onSurfaceVariant,
+                    height: 1.6,
+                  ),
                 ),
               ],
             ),
@@ -265,8 +343,9 @@ class _SearchPageState extends State<SearchPage>
                       const SizedBox(height: 2),
                       Text(
                         show ? '点击打开该漫画' : '例如输入 422889 后点击此卡片',
-                        style: tt.labelSmall
-                            ?.copyWith(color: cs.onSurfaceVariant),
+                        style: tt.labelSmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -314,8 +393,11 @@ class _SearchField extends StatelessWidget {
           builder: (_, _) => controller.text.isEmpty
               ? const SizedBox.shrink()
               : IconButton(
-                  icon: Icon(Icons.close_rounded,
-                      size: 20, color: cs.onSurfaceVariant),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 20,
+                    color: cs.onSurfaceVariant,
+                  ),
                   onPressed: onClear,
                 ),
         ),
@@ -332,8 +414,7 @@ class _SearchField extends StatelessWidget {
           borderSide: BorderSide(color: cs.primary, width: 1.2),
         ),
         filled: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
       ),
     );
   }

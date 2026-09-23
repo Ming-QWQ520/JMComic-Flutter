@@ -25,8 +25,9 @@ class ReaderPage extends StatefulWidget {
 }
 
 class _ReaderPageState extends State<ReaderPage> {
-  static const MethodChannel _channel =
-      MethodChannel('com.ming.jmcomic/volume');
+  static const MethodChannel _channel = MethodChannel(
+    'com.ming.jmcomic/volume',
+  );
 
   final JmApi _api = JmApi.instance;
   final PageController _pageCtrl = PageController();
@@ -42,6 +43,7 @@ class _ReaderPageState extends State<ReaderPage> {
   // 图片字节缓存（页码 → 已还原图片字节）
   final Map<int, Uint8List> _cache = <int, Uint8List>{};
   final Set<int> _pending = <int>{};
+  final Set<int> _failedPages = <int>{};
 
   bool _barVisible = true;
   bool _scrambled = false;
@@ -58,7 +60,7 @@ class _ReaderPageState extends State<ReaderPage> {
       final args =
           (ModalRoute.of(context)?.settings.arguments as Map?)
               ?.cast<String, String>() ??
-              const <String, String>{};
+          const <String, String>{};
       _albumId = args['albumId'] ?? '';
       _chapterId = args['chapterId'] ?? '';
       _title = args['title'] ?? '';
@@ -77,9 +79,11 @@ class _ReaderPageState extends State<ReaderPage> {
     _focus.dispose();
     _channel.setMethodCallHandler(null);
     // 离开阅读器：关闭常亮与音量键拦截
-    _channel.invokeMethod('keepScreenOn', <String, dynamic>{'enabled': false})
+    _channel
+        .invokeMethod('keepScreenOn', <String, dynamic>{'enabled': false})
         .catchError((_) {});
-    _channel.invokeMethod('setEnabled', <String, dynamic>{'enabled': false})
+    _channel
+        .invokeMethod('setEnabled', <String, dynamic>{'enabled': false})
         .catchError((_) {});
     super.dispose();
   }
@@ -99,14 +103,16 @@ class _ReaderPageState extends State<ReaderPage> {
     final app = context.read<AppState>();
     if (app.keepScreenOn) {
       try {
-        await _channel.invokeMethod(
-            'keepScreenOn', <String, dynamic>{'enabled': true});
+        await _channel.invokeMethod('keepScreenOn', <String, dynamic>{
+          'enabled': true,
+        });
       } catch (_) {}
     }
     if (_volumeKeys) {
       try {
-        await _channel
-            .invokeMethod('setEnabled', <String, dynamic>{'enabled': true});
+        await _channel.invokeMethod('setEnabled', <String, dynamic>{
+          'enabled': true,
+        });
       } catch (_) {}
     }
   }
@@ -175,9 +181,12 @@ class _ReaderPageState extends State<ReaderPage> {
       }
       if (!mounted) return bytes;
       setState(() => _cache[index] = bytes);
+      _failedPages.remove(index);
       return bytes;
     } catch (_) {
-      if (mounted) setState(() {});
+      if (mounted) {
+        setState(() => _failedPages.add(index));
+      }
       return null;
     } finally {
       _pending.remove(index);
@@ -221,10 +230,12 @@ class _ReaderPageState extends State<ReaderPage> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        duration: const Duration(milliseconds: 800),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          duration: const Duration(milliseconds: 800),
+        ),
+      );
   }
 
   void _toggleBar() {
@@ -354,8 +365,10 @@ class _ReaderPageState extends State<ReaderPage> {
           children: [
             CircularProgressIndicator(color: Colors.white70, strokeWidth: 2.6),
             SizedBox(height: 14),
-            Text('正在加载章节图片…',
-                style: TextStyle(color: Colors.white54, fontSize: 13)),
+            Text(
+              '正在加载章节图片…',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
           ],
         ),
       );
@@ -365,9 +378,11 @@ class _ReaderPageState extends State<ReaderPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(_error,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+            Text(
+              _error,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
             const SizedBox(height: 16),
             FilledButton.tonalIcon(
               onPressed: _load,
@@ -380,7 +395,8 @@ class _ReaderPageState extends State<ReaderPage> {
     }
     if (_images.isEmpty) {
       return const Center(
-          child: Text('无图片数据', style: TextStyle(color: Colors.white70)));
+        child: Text('无图片数据', style: TextStyle(color: Colors.white70)),
+      );
     }
     final rtl = _direction == ReadDirection.rightToLeft;
     final axis = _direction == ReadDirection.vertical
@@ -404,27 +420,63 @@ class _ReaderPageState extends State<ReaderPage> {
   Widget _pageImage(int i) {
     final bytes = _cache[i];
     if (bytes == null) {
+      if (_failedPages.contains(i)) {
+        // 加载失败：提供明确的重试入口，而不是无限转圈
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.white70,
+                size: 34,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                '第 ${i + 1} 页加载失败',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: () {
+                  setState(() => _failedPages.remove(i));
+                  _loadImage(i);
+                },
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        );
+      }
       _loadImage(i);
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(100),
               ),
-              child: Text('${i + 1} / ${_images.length}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 13)),
+              child: Text(
+                '${i + 1} / ${_images.length}',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
             ),
             const SizedBox(height: 12),
             const SizedBox(
               width: 24,
               height: 24,
               child: CircularProgressIndicator(
-                  strokeWidth: 2.2, color: Colors.white60),
+                strokeWidth: 2.2,
+                color: Colors.white60,
+              ),
             ),
           ],
         ),
@@ -455,16 +507,20 @@ class _ReaderPageState extends State<ReaderPage> {
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
         child: Row(
           children: <Widget>[
-            Text('$_currentPage',
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              '$_currentPage',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
             Expanded(
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   trackHeight: 2,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 7),
-                  overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 14),
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 7,
+                  ),
+                  overlayShape: const RoundSliderOverlayShape(
+                    overlayRadius: 14,
+                  ),
                   activeTrackColor: Theme.of(context).colorScheme.primary,
                   inactiveTrackColor: Colors.white24,
                   thumbColor: Colors.white,
@@ -482,12 +538,13 @@ class _ReaderPageState extends State<ReaderPage> {
                 ),
               ),
             ),
-            Text('${_images.length}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Text(
+              '${_images.length}',
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
           ],
         ),
       ),
     );
   }
 }
-

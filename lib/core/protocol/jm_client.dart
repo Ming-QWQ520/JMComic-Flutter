@@ -675,75 +675,56 @@ class JmClient {
 
   /// 图片下载（图片域名轮询 + 失败自动切换，对齐 qt DownloadBookReq）。
   ///
-  /// [path] 形如 `/media/photos/{epsId}/{name}` 或完整 URL。
+  /// [rawUrl] 形如 `/media/photos/{epsId}/{name}`、
+  /// `https://cdn-msp.xxx/media/photos/...`（comic_read 下发的完整 URL）。
+  ///
+  /// 每次尝试都用当前 [imgHost] 替换 URL 的 host（对齐 qt useImgProxy：
+  /// 服务端下发的域名未必可用，以用户所选线路为准），失败后轮询下一域名；
   /// `_3x4` 封面失败时自动回退无后缀版本（对齐 qt resetUrl 逻辑）。
   Future<List<int>> fetchImage(String rawUrl) async {
     await _ensureReady();
     final is3x4 = rawUrl.contains('_3x4');
+    // 提取 URL 中的路径部分（host 之后），用于按线路重建 URL
+    final pathPart = _extractImagePath(rawUrl);
     final attemptMax = JmDomain.picUrlList.value.length;
     Object? lastCause;
 
-    for (var attempt = 0; attempt < attemptMax; attempt++) {
-      var urlStr = rawUrl;
-      if (!urlStr.startsWith('http')) {
-        final base = imgHost;
-        urlStr = base.endsWith('/')
-            ? '$base${urlStr.substring(1)}'
-            : '$base$urlStr';
-      }
-      try {
-        if (enableDoh) await dohResolve(Uri.parse(urlStr).host);
-        final req = await _client
-            .openUrl('GET', Uri.parse(urlStr))
-            .timeout(const Duration(seconds: 30));
-        final h = _imgHeaders();
-        h.remove('Content-Type');
-        h.forEach((k, v) => req.headers.set(k, v));
-        final resp = await req.close().timeout(const Duration(seconds: 30));
-        if (resp.statusCode == 200) {
-          final builder = BytesBuilder(copy: false);
-          await for (final chunk in resp) {
-            builder.add(chunk);
-          }
-          final bytes = builder.takeBytes();
-          // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则回源）
-          if (bytes.isNotEmpty &&
-              bytes.length < 3000 &&
-              !urlStr.contains('?')) {
-            continue;
-          }
-          return bytes;
-        }
+    Future<List<int>> tryOnce(String urlStr) async {
+      if (enableDoh) await dohResolve(Uri.parse(urlStr).host);
+      final req = await _client
+          .openUrl('GET', Uri.parse(urlStr))
+          .timeout(const Duration(seconds: 30));
+      _imgHeaders().forEach((k, v) => req.headers.set(k, v));
+      final resp = await req.close().timeout(const Duration(seconds: 30));
+      if (resp.statusCode != 200) {
         await resp.drain<void>().catchError((_) {});
-        lastCause = 'HTTP ${resp.statusCode}';
+        throw JmHttpException(resp.statusCode, '图片 HTTP ${resp.statusCode}');
+      }
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in resp) {
+        builder.add(chunk);
+      }
+      final bytes = builder.takeBytes();
+      // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则视为失败回源）
+      if (bytes.isEmpty || (bytes.length < 3000 && !urlStr.contains('?'))) {
+        throw const JmHttpException(0, '空白图');
+      }
+      return bytes;
+    }
+
+    for (var attempt = 0; attempt < attemptMax; attempt++) {
+      final urlStr = _withImgHost(pathPart);
+      try {
+        return await tryOnce(urlStr);
+      } on JmHttpException catch (e) {
+        lastCause = e;
       } catch (e) {
         lastCause = e;
       }
       // _3x4 封面失败 → 尝试无后缀原图
       if (is3x4) {
-        final noSuffix = rawUrl.replaceAll('_3x4', '');
         try {
-          final base = imgHost;
-          final u2 = noSuffix.startsWith('http')
-              ? noSuffix
-              : (base.endsWith('/')
-                    ? '$base${noSuffix.substring(1)}'
-                    : '$base$noSuffix');
-          final req = await _client
-              .openUrl('GET', Uri.parse(u2))
-              .timeout(const Duration(seconds: 30));
-          final h = _imgHeaders();
-          h.remove('Content-Type');
-          h.forEach((k, v) => req.headers.set(k, v));
-          final resp = await req.close().timeout(const Duration(seconds: 30));
-          if (resp.statusCode == 200) {
-            final builder = BytesBuilder(copy: false);
-            await for (final chunk in resp) {
-              builder.add(chunk);
-            }
-            return builder.takeBytes();
-          }
-          await resp.drain<void>().catchError((_) {});
+          return await tryOnce(_withImgHost(pathPart.replaceAll('_3x4', '')));
         } catch (_) {}
       }
       // 轮询下一个图片域名
@@ -753,6 +734,27 @@ class JmClient {
       imgIndex = _imgRotate + 1;
     }
     throw JmHttpException(0, '图片下载失败: $rawUrl', lastCause);
+  }
+
+  /// 提取图片 URL 的路径部分（host 之后，以 / 开头，保留 query）。
+  String _extractImagePath(String raw) {
+    if (raw.startsWith('http')) {
+      final u = Uri.tryParse(raw);
+      if (u != null && u.path.isNotEmpty) {
+        var p = u.path;
+        if (u.query.isNotEmpty) p += '?${u.query}';
+        return p.startsWith('/') ? p : '/$p';
+      }
+      return raw;
+    }
+    return raw.startsWith('/') ? raw : '/$raw';
+  }
+
+  /// 用当前图片线路 host 拼接完整图片 URL。
+  String _withImgHost(String path) {
+    var base = imgHost;
+    if (base.endsWith('/')) base = base.substring(0, base.length - 1);
+    return '$base$path';
   }
 
   /// 测速（对齐 qt SpeedTestPingReq：HEAD 请求计时）。

@@ -18,8 +18,10 @@ class LoadingView extends StatelessWidget {
           CircularProgressIndicator(color: cs.primary, strokeWidth: 2.6),
           if (message != null) ...[
             const SizedBox(height: 14),
-            Text(message!,
-                style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+            Text(
+              message!,
+              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+            ),
           ],
         ],
       ),
@@ -29,14 +31,18 @@ class LoadingView extends StatelessWidget {
 
 /// 页面级错误。
 class ErrorView extends StatelessWidget {
-  const ErrorView({super.key, this.message, this.onRetry});
+  const ErrorView({super.key, this.message, this.error, this.onRetry});
 
   final String? message;
+
+  /// 原始异常对象：展示其 toString()，方便用户反馈真实原因。
+  final Object? error;
   final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final detail = error?.toString();
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -50,15 +56,16 @@ class ErrorView extends StatelessWidget {
                 color: cs.errorContainer.withValues(alpha: 0.35),
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.wifi_off_rounded,
-                  size: 34, color: cs.error.withValues(alpha: 0.8)),
+              child: Icon(
+                Icons.wifi_off_rounded,
+                size: 34,
+                color: cs.error.withValues(alpha: 0.8),
+              ),
             ),
             const SizedBox(height: 18),
             Text(
               '加载失败',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
+              style: Theme.of(context).textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
@@ -67,6 +74,31 @@ class ErrorView extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
             ),
+            if (detail != null && detail.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                constraints: const BoxConstraints(maxWidth: 340),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '错误详情：$detail',
+                  textAlign: TextAlign.center,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: cs.onSurfaceVariant,
+                    fontSize: 11.5,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+            ],
             if (onRetry != null) ...[
               const SizedBox(height: 20),
               FilledButton.icon(
@@ -103,12 +135,17 @@ class EmptyView extends StatelessWidget {
               color: cs.surfaceContainerHighest.withValues(alpha: 0.6),
               shape: BoxShape.circle,
             ),
-            child: Icon(icon ?? Icons.inbox_outlined,
-                size: 32, color: cs.onSurfaceVariant),
+            child: Icon(
+              icon ?? Icons.inbox_outlined,
+              size: 32,
+              color: cs.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 16),
-          Text(message,
-              style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13)),
+          Text(
+            message,
+            style: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
+          ),
         ],
       ),
     );
@@ -139,8 +176,10 @@ class SectionHeader extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(title,
-                style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+            child: Text(
+              title,
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            ),
           ),
           ?action,
         ],
@@ -162,9 +201,13 @@ class TailLoader extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 18),
         child: Center(
-          child: Text(label ?? '— 已经到底啦 —',
-              style: TextStyle(
-                  color: Theme.of(context).colorScheme.outline, fontSize: 12)),
+          child: Text(
+            label ?? '— 已经到底啦 —',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.outline,
+              fontSize: 12,
+            ),
+          ),
         ),
       );
     }

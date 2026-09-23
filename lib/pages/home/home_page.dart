@@ -29,13 +29,8 @@ class _HomePageState extends State<HomePage>
   void initState() {
     super.initState();
     _grid = AlbumGrid(
-      fetchPage: (int page) async {
-        try {
-          return await JmApi.instance.getLatest(page);
-        } catch (_) {
-          return null;
-        }
-      },
+      // 异常直接抛给 AlbumGrid，展示真实错误详情
+      fetchPage: (int page) => JmApi.instance.getLatest(page),
     );
     _loadBlocks();
   }
@@ -83,8 +78,10 @@ class _HomePageState extends State<HomePage>
             flexibleSpace: FlexibleSpaceBar(
               titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
               centerTitle: false,
-              title: Text('首页',
-                  style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+              title: Text(
+                '首页',
+                style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              ),
               background: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(

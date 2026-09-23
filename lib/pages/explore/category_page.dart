@@ -78,63 +78,70 @@ class _CategoryPageState extends State<CategoryPage>
       body: _loading
           ? const LoadingView()
           : _error.isNotEmpty
-              ? ErrorView(message: _error, onRetry: _load)
-              : ListView.separated(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _cats.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (_, i) {
-                    final cat = _cats[i];
-                    return Card(
-                      child: InkWell(
-                        onTap: () => _openCategory(context, cat),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 14),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: cs.primary.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: Icon(
-                                  _iconFor(cat),
-                                  size: 22,
-                                  color: cs.primary,
-                                ),
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    Text(cat.name,
-                                        style: tt.titleSmall?.copyWith(
-                                            fontWeight: FontWeight.w700)),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      cat.subCategories.isEmpty
-                                          ? '共 ${cat.totalAlbums} 部作品'
-                                          : '${cat.subCategories.length} 个子分类 · 共 ${cat.totalAlbums} 部作品',
-                                      style: tt.labelSmall?.copyWith(
-                                          color: cs.onSurfaceVariant),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Icon(Icons.chevron_right_rounded,
-                                  color: cs.onSurfaceVariant),
-                            ],
-                          ),
-                        ),
+          ? ErrorView(message: _error, onRetry: _load)
+          : ListView.separated(
+              padding: const EdgeInsets.all(16),
+              itemCount: _cats.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (_, i) {
+                final cat = _cats[i];
+                return Card(
+                  child: InkWell(
+                    onTap: () => _openCategory(context, cat),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
                       ),
-                    );
-                  },
-                ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: cs.primary.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              _iconFor(cat),
+                              size: 22,
+                              color: cs.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  cat.name,
+                                  style: tt.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  cat.subCategories.isEmpty
+                                      ? '共 ${cat.totalAlbums} 部作品'
+                                      : '${cat.subCategories.length} 个子分类 · 共 ${cat.totalAlbums} 部作品',
+                                  style: tt.labelSmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
     );
   }
 
@@ -155,9 +162,7 @@ class _CategoryPageState extends State<CategoryPage>
   void _openCategory(BuildContext context, Category cat) {
     Navigator.push(
       context,
-      MaterialPageRoute<void>(
-        builder: (_) => CategoryListPage(category: cat),
-      ),
+      MaterialPageRoute<void>(builder: (_) => CategoryListPage(category: cat)),
     );
   }
 }
@@ -192,17 +197,14 @@ class _CategoryListPageState extends State<CategoryListPage> {
   void _resetGrid() => _gridKey.currentState?.reset();
 
   Future<List<SearchAlbum>?> _fetch(int page) async {
-    try {
-      // 对齐 qt GetSearchCategoryReq2：c=分类 slug，o=排序
-      final r = await JmApi.instance.searchCategory(
-        _sub.isEmpty ? widget.category.slug : _sub,
-        page,
-        order: _order,
-      );
-      return r.content;
-    } catch (_) {
-      return null;
-    }
+    // 对齐 qt GetSearchCategoryReq2：c=分类 slug，o=排序
+    // 异常直接抛给 AlbumGrid，展示真实错误详情
+    final r = await JmApi.instance.searchCategory(
+      _sub.isEmpty ? widget.category.slug : _sub,
+      page,
+      order: _order,
+    );
+    return r.content;
   }
 
   @override
@@ -220,21 +222,25 @@ class _CategoryListPageState extends State<CategoryListPage> {
               _resetGrid();
             },
             itemBuilder: (_) => _orders.entries
-                .map((MapEntry<String, String> e) => PopupMenuItem<String>(
-                      value: e.key,
-                      child: Row(
-                        children: [
-                          if (_order == e.key)
-                            Icon(Icons.check_rounded,
-                                size: 18,
-                                color: Theme.of(context).colorScheme.primary)
-                          else
-                            const SizedBox(width: 18),
-                          const SizedBox(width: 8),
-                          Text(e.value),
-                        ],
-                      ),
-                    ))
+                .map(
+                  (MapEntry<String, String> e) => PopupMenuItem<String>(
+                    value: e.key,
+                    child: Row(
+                      children: [
+                        if (_order == e.key)
+                          Icon(
+                            Icons.check_rounded,
+                            size: 18,
+                            color: Theme.of(context).colorScheme.primary,
+                          )
+                        else
+                          const SizedBox(width: 18),
+                        const SizedBox(width: 8),
+                        Text(e.value),
+                      ],
+                    ),
+                  ),
+                )
                 .toList(),
           ),
           const SizedBox(width: 6),
@@ -247,8 +253,10 @@ class _CategoryListPageState extends State<CategoryListPage> {
               height: 50,
               child: ListView(
                 scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 6,
+                ),
                 children: <Widget>[
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
@@ -278,10 +286,7 @@ class _CategoryListPageState extends State<CategoryListPage> {
               ),
             ),
           Expanded(
-            child: AlbumGrid(
-              key: _gridKey,
-              fetchPage: _fetch,
-            ),
+            child: AlbumGrid(key: _gridKey, fetchPage: _fetch),
           ),
         ],
       ),

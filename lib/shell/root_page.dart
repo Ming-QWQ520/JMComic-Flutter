@@ -18,6 +18,7 @@ class _RootPageState extends State<RootPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
       body: IndexedStack(
         index: _index,
@@ -28,31 +29,46 @@ class _RootPageState extends State<RootPage> {
           ProfilePage(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (int i) => setState(() => _index = i),
-        destinations: const <Widget>[
-          NavigationDestination(
-            icon: Icon(Icons.rocket_launch_outlined),
-            selectedIcon: Icon(Icons.rocket_launch_rounded),
-            label: '发现',
+      // Scaffold 会自动在 NavigationBar 下方垫 MediaQuery.viewPadding.bottom
+      // （系统手势条高度），保证 edge-to-edge 下底栏不被遮挡。
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: cs.outlineVariant.withValues(alpha: 0.45),
+              width: 0.6,
+            ),
           ),
-          NavigationDestination(
-            icon: Icon(Icons.grid_view_outlined),
-            selectedIcon: Icon(Icons.grid_view_rounded),
-            label: '分类',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search_rounded),
-            label: '搜索',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline_rounded),
-            selectedIcon: Icon(Icons.person_rounded),
-            label: '我的',
-          ),
-        ],
+        ),
+        child: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (int i) => setState(() => _index = i),
+          backgroundColor: cs.surface,
+          surfaceTintColor: cs.surface,
+          shadowColor: Colors.transparent,
+          destinations: const <Widget>[
+            NavigationDestination(
+              icon: Icon(Icons.rocket_launch_outlined),
+              selectedIcon: Icon(Icons.rocket_launch_rounded),
+              label: '发现',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.grid_view_outlined),
+              selectedIcon: Icon(Icons.grid_view_rounded),
+              label: '分类',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.search_outlined),
+              selectedIcon: Icon(Icons.search_rounded),
+              label: '搜索',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded),
+              label: '我的',
+            ),
+          ],
+        ),
       ),
     );
   }
