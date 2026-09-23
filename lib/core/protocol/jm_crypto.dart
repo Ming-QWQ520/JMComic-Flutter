@@ -8,6 +8,36 @@ import 'jm_domain.dart';
 /// 请求签名三元组（randomToken / scrambleToken 的返回类型）。
 typedef JmCryptoToken = ({String ts, String tokenparam, String token});
 
+/// 服务器时间同步（以任意响应的 Date 头为准校正设备时钟偏差）。
+///
+/// 部分线路/边缘节点会校验 tokenparam 中 ts 的新鲜度，设备时钟偏差过大时
+/// 会直接拒绝请求（HTTP 400），因此签名时间戳一律使用同步后的服务器时间。
+/// 响应 Date 头为 GMT；偏差按秒记录，请求时在设备时间上叠加修正。
+class JmClock {
+  JmClock._();
+
+  static int _offsetSec = 0;
+
+  /// 签名/解密共用的 unix 秒（设备时间 + 服务器偏差修正）。
+  static int nowSeconds() =>
+      DateTime.now().toUtc().millisecondsSinceEpoch ~/ 1000 + _offsetSec;
+
+  /// 从响应 Date 头同步偏差（含错误响应——400/403 响应同样携带 Date）。
+  static void syncFromHeader(DateTime? serverDate) {
+    if (serverDate == null) return;
+    _offsetSec = serverDate
+        .toUtc()
+        .difference(DateTime.now().toUtc())
+        .inSeconds;
+  }
+
+  /// 与设备时钟的偏差秒数（用于诊断提示）。
+  static int get offsetSeconds => _offsetSec;
+
+  /// 人为注入偏差（秒）——测试与极端场景自救用。
+  static void debugSetOffset(int sec) => _offsetSec = sec;
+}
+
 /// JMComic 协议密钥与加解密工具（还原自 tonquer/JMComic-qt + jmcomic 库标准实现）。
 ///
 /// - 请求头签名：token = MD5("{ts}18comicAPP")，tokenparam = "{ts},{HeaderVer}"；
@@ -73,7 +103,7 @@ class JmCrypto {
   /// - tokenparam: "{ts},{HeaderVer}"
   /// - token: MD5("{ts}" + tokenSecret) 小写 hex
   static JmCryptoToken randomToken() {
-    final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+    final ts = JmClock.nowSeconds().toString();
     final tokenparam = '$ts,$appVersion';
     final token = md5Hex(ts + tokenSecret);
     return (ts: ts, tokenparam: tokenparam, token: token);
@@ -81,7 +111,7 @@ class JmCrypto {
 
   /// `/chapter_view_template` 专用签名（对齐 qt GetHeader2 / jmcomic 特殊逻辑）。
   static JmCryptoToken scrambleToken() {
-    final ts = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+    final ts = JmClock.nowSeconds().toString();
     final tokenparam = '$ts,$appVersion';
     final token = md5Hex(ts + scrambleTokenSecret);
     return (ts: ts, tokenparam: tokenparam, token: token);

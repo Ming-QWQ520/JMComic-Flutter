@@ -23,14 +23,28 @@ class JmHttpException implements Exception {
 
   /// HTTP 状态码（0 表示网络错误）。
   final int status;
+
+  /// 诊断信息：错误响应体片段 / 线路尝试记录。
   final String body;
   final Object? cause;
 
   @override
   String toString() {
-    if (status != 0) return 'HTTP $status: $body';
-    return '网络错误: $cause';
+    if (status != 0) return 'HTTP $status${body.isEmpty ? '' : ': $body'}';
+    return '网络错误: ${body.isEmpty ? cause : body}';
   }
+}
+
+/// 一次请求尝试（URL + 诊断标签 + 是否强制 DoH 直连）。
+class _Attempt {
+  const _Attempt(this.url, this.tag, {this.forceDoh = false, this.apiPos = -1});
+
+  final String url;
+  final String tag;
+  final bool forceDoh;
+
+  /// 对应 apiUrlList 的位置（成功时用于记住首选线路；反代/DoH 尝试为 -1）。
+  final int apiPos;
 }
 
 /// 统一响应信封（已解密）。
@@ -99,31 +113,30 @@ class JmClient {
   }
 
   /// 自定义连接工厂：启用 DoH 时按解析出的 IP 直连。
+  ///
+  /// ⚠ dart:io 约定：connectionFactory 返回的 socket 会被 HttpClient 直接
+  /// 使用，**TLS 必须由工厂自己完成**（HttpClient 不会再握手）。若对
+  /// https URL 返回普通 TCP socket，请求将以明文 HTTP 打到 443 端口，
+  /// Cloudflare 会返回 400 "The plain HTTP request was sent to HTTPS port"
+  /// ——这正是之前线上 400 错误的根因。
   Future<ConnectionTask<Socket>> _connectionFactory(
     Uri url,
     String? proxyHost,
     int? proxyPort,
   ) async {
-    var host = url.host;
-    var port = url.port;
-    if (proxyHost != null && proxyPort != null) {
-      host = proxyHost;
-      port = proxyPort;
-    }
-    final ip = _dnsCache[host];
-    if (ip == null || ip == host) {
-      return Socket.startConnect(host, port);
-    }
+    final ip = _dnsCache[url.host]; // DoH 解析结果（按目标 host 查）
+    final host = proxyHost ?? url.host;
+    final port = proxyPort ?? url.port;
     if (url.scheme == 'https') {
-      // IP 直连无法按域名校验证书，需信任
       return SecureSocket.startConnect(
-        ip,
+        ip ?? host,
         port,
-        onBadCertificate: (_) => true,
+        // 仅 DoH IP 直连时无法按域名校验证书，需信任
+        onBadCertificate: ip == null ? null : (_) => true,
         supportedProtocols: const <String>['http/1.1'],
       );
     }
-    return Socket.startConnect(ip, port);
+    return Socket.startConnect(ip ?? host, port);
   }
 
   // ---------- 线路管理 ----------
@@ -385,7 +398,17 @@ class JmClient {
     Map<String, dynamic> params, {
     bool withLang = true,
   }) {
-    var base = apiHost;
+    return _apiUrlWithHost(apiHost, path, params, withLang: withLang);
+  }
+
+  /// 指定主机的 URL 构造（与 qt 逐字对齐：`{host}/{path}/?{query}`）。
+  String _apiUrlWithHost(
+    String host,
+    String path,
+    Map<String, dynamic> params, {
+    bool withLang = true,
+  }) {
+    var base = host;
     if (!base.endsWith('/')) base = '$base/';
     var p = path.startsWith('/') ? path.substring(1) : path;
     final query = buildQuery(params, withLang: withLang);
@@ -394,12 +417,118 @@ class JmClient {
     return url;
   }
 
+  /// 官方反代线路 URL（对齐 qt 线路6 __DealHeaders：
+  /// `https://jm2-api.jpacg.cc/<原域名>/<path>/?<query>`，
+  /// 反代为独立 nginx，不经 Cloudflare 边缘，可绕过边缘侧拦截）。
+  String _proxyApiUrl(
+    String proxyHost,
+    String apiHost,
+    String path,
+    Map<String, dynamic> params, {
+    bool withLang = true,
+  }) {
+    var p = path.startsWith('/') ? path.substring(1) : path;
+    final query = buildQuery(params, withLang: withLang);
+    var url =
+        'https://${JmDomain.urlHost(proxyHost)}/${JmDomain.urlHost(apiHost)}/$p/';
+    if (query.isNotEmpty) url += '?$query';
+    return url;
+  }
+
+  /// 构造本次请求的多级尝试序列（彻底修复 400/403/网络异常的核心）：
+  ///
+  /// 1. 全部普通 API 线路（Url2List，从用户所选线路轮转起）
+  ///    + 远程 jm3_Server 补充线路（如 www.cdnutc.me）；
+  /// 2. 官方反代线路（qt 线路6同款，绕过 Cloudflare 边缘）；
+  /// 3. DoH 解析 IP 直连（绕过 DNS 污染/劫持，仅在前两步全部失败且未开 DoH 时）。
+  ///
+  /// 每次尝试都重新生成签名；任意一次成功即返回。
+  List<_Attempt> _buildAttempts(
+    String path,
+    Map<String, dynamic> params, {
+    bool withLang = true,
+  }) {
+    final out = <_Attempt>[];
+    final hosts = <String>[];
+    void addHost(String h) {
+      final t = h.trim();
+      if (t.isEmpty) return;
+      final full = t.startsWith('http') ? t : 'https://$t';
+      if (!hosts.contains(full)) hosts.add(full);
+    }
+
+    // 普通线路：从当前线路索引起轮转（对齐 qt ResetToSwitchNextUrl）
+    final base = JmDomain.apiUrlList.value;
+    if (base.isNotEmpty) {
+      final start = (apiIndex - 1).clamp(0, base.length - 1);
+      for (var i = 0; i < base.length; i++) {
+        final pos = (start + i) % base.length;
+        final h = base[pos];
+        final before = hosts.length;
+        addHost(h);
+        if (hosts.length == before) continue; // 去重：已存在
+        out.add(
+          _Attempt(
+            _apiUrlWithHost(h, path, params, withLang: withLang),
+            JmDomain.urlHost(h),
+            apiPos: pos,
+          ),
+        );
+      }
+    }
+    // 远程 jm3_Server 补充线路（可能包含 Url2List 之外的新线路）
+    for (final line in _hostConfig?.jm3Server ?? const <List<String>>[]) {
+      if (line.isEmpty) continue;
+      final h = line.first.trim();
+      if (h.isEmpty) continue;
+      final full = h.startsWith('http') ? h : 'https://$h';
+      if (hosts.contains(full)) continue;
+      addHost(h);
+      out.add(
+        _Attempt(
+          _apiUrlWithHost(full, path, params, withLang: withLang),
+          JmDomain.urlHost(full),
+        ),
+      );
+    }
+    // 官方反代线路（独立 nginx，不经 Cloudflare）
+    final proxyHost = JmDomain.proxyApiDomain2.value.trim();
+    if (proxyHost.isNotEmpty && hosts.isNotEmpty) {
+      out.add(
+        _Attempt(
+          _proxyApiUrl(
+            proxyHost,
+            hosts.first,
+            path,
+            params,
+            withLang: withLang,
+          ),
+          '${JmDomain.urlHost(proxyHost)}(反代)',
+        ),
+      );
+    }
+    // DoH 直连（绕过 DNS 污染；用户已开启 DoH 时无需重复）
+    if (!enableDoh) {
+      for (final h in hosts.take(2)) {
+        out.add(
+          _Attempt(
+            _apiUrlWithHost(h, path, params, withLang: withLang),
+            '${JmDomain.urlHost(h)}(DoH)',
+            forceDoh: true,
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
   // ---------- 核心请求 ----------
 
   /// 统一 API 请求入口。
   ///
-  /// 失败时自动切换下一 API 域名重试（对齐 qt ResetToSwitchNextUrl），
-  /// 最多遍历全部域名列表 1 轮。
+  /// 按 [_buildAttempts] 的多级线路序列依次尝试（普通线路 → 反代 → DoH），
+  /// 任意非 200（含 400/401/403/5xx）与网络错误都继续下一级（对齐 qt
+  /// ResetToSwitchNextUrl 并扩展）；全部失败后抛出汇总诊断信息的异常。
   Future<JmResponse> _do(
     String method,
     String path, {
@@ -411,34 +540,37 @@ class JmClient {
     Map<String, String>? extraHeaders,
   }) async {
     await _ensureReady();
-    final attemptMax = JmDomain.apiUrlList.value.length;
+    final attempts = _buildAttempts(path, params, withLang: withLang);
     final tried = <String>[];
     Object? lastCause;
+    var dohWorked = false;
 
-    for (var attempt = 0; attempt < attemptMax; attempt++) {
-      final urlStr = _apiUrl(path, params, withLang: withLang);
+    for (final a in attempts) {
       // 每次尝试生成一次签名；请求头与响应解密使用同一个 ts（对齐 qt：
       // self.now 同时用于 GetHeader 与 ParseData，不可两次生成）。
       final t = JmCrypto.randomToken();
       try {
         final resp = await _send(
           method,
-          Uri.parse(urlStr),
+          Uri.parse(a.url),
           headers: {
             ..._apiHeaders(t, contentType: contentType, auth: auth),
             ...?extraHeaders,
           },
           body: body,
+          forceDoh: a.forceDoh,
         );
-        return await _decryptResponse(resp, ts: t.ts);
+        final r = await _decryptResponse(resp, ts: t.ts);
+        if (a.apiPos >= 0) apiIndex = a.apiPos + 1;
+        if (a.forceDoh) dohWorked = true;
+        return r;
       } on JmApiException {
         // 业务错误（HTTP 200 但 code != 200），换域名无意义，直接抛给上层
         rethrow;
       } on JmHttpException catch (e) {
-        // 对齐 qt：任意非 200（含 400/401/403/5xx）都切换下一域名重试。
-        // 不同地区/运营商解析到的 CDN 节点不同，部分节点 WAF 规则更严，
-        // 节点级的 400/403 换节点即可绕过。
-        tried.add('${Uri.parse(urlStr).host}=>${e.status}');
+        tried.add(
+          '${a.tag}=>${e.status}${e.body.isEmpty ? '' : '(${_short(e.body, 60)})'}',
+        );
         lastCause = e;
         if (e.status == 401 && auth && _jwt.isNotEmpty) {
           // 登录态失效（token 过期）：清除旧 token，避免继续毒化后续请求
@@ -449,40 +581,77 @@ class JmClient {
           } catch (_) {}
         }
       } catch (e) {
-        tried.add('${Uri.parse(urlStr).host}=>net');
+        tried.add('${a.tag}=>net');
         lastCause = e;
       }
-      // 切换下一个 API 域名重试
-      final list = JmDomain.apiUrlList.value;
-      if (list.isEmpty) break;
-      apiIndex = apiIndex % list.length + 1;
     }
-    throw JmHttpException(0, '全部线路失败 [${tried.join(', ')}]', lastCause);
+    if (dohWorked) enableDoh = true; // DoH 直连成功则本会话保持
+    var hint = '';
+    final off = JmClock.offsetSeconds;
+    if (off.abs() > 120) hint = '（设备时间与服务器相差约${off.abs()}秒，已自动校准）';
+    throw JmHttpException(0, '全部线路失败$hint [${tried.join(', ')}]', lastCause);
   }
 
   /// 底层 HTTP 发送（支持 DoH 预解析）。
   ///
-  /// 任意非 2xx 状态码（含 400/401/403/5xx）都抛 JmHttpException，
-  /// 由 [_do] 统一切换域名重试（对齐 qt：所有非 Ok 状态都 ResetToSwitchNextUrl）。
+  /// 任意非 2xx 状态码（含 400/401/403/5xx）都抛 JmHttpException（附带
+  /// server/cf-ray/响应体片段诊断信息），由 [_do] 统一切线路重试。
+  /// 所有响应（含错误响应）都会用 Date 头同步服务器时间（[JmClock]）。
   Future<HttpClientResponse> _send(
     String method,
     Uri url, {
     Map<String, String> headers = const <String, String>{},
     String? body,
     Duration timeout = const Duration(seconds: 20),
+    bool forceDoh = false,
   }) async {
-    if (enableDoh) await dohResolve(url.host);
+    if (enableDoh || forceDoh) await dohResolve(url.host);
     final req = await _client.openUrl(method, url).timeout(timeout);
     headers.forEach((k, v) => req.headers.set(k, v));
     if (body != null && body.isNotEmpty) {
       req.add(utf8.encode(body));
     }
     final resp = await req.close().timeout(timeout);
+    // 服务器时间同步（错误响应同样携带 Date 头）
+    try {
+      JmClock.syncFromHeader(resp.headers.date);
+    } catch (_) {}
     if (resp.statusCode < 200 || resp.statusCode > 299) {
-      await resp.drain<void>().catchError((_) {});
-      throw JmHttpException(resp.statusCode);
+      final snippet = await _errorSnippet(resp);
+      throw JmHttpException(resp.statusCode, snippet);
     }
     return resp;
+  }
+
+  /// 读取错误响应的诊断片段（截断至 ~400 字符，附带 server / cf-ray 头）。
+  Future<String> _errorSnippet(HttpClientResponse resp) async {
+    final sb = StringBuffer();
+    final srv = resp.headers.value('server');
+    final ray = resp.headers.value('cf-ray');
+    final mit = resp.headers.value('cf-mitigated');
+    final diag = <String>[
+      if (srv != null && srv.isNotEmpty) 'server=$srv',
+      if (mit != null && mit.isNotEmpty) 'cf-mitigated=$mit',
+      if (ray != null && ray.isNotEmpty) 'ray=${_short(ray, 12)}',
+    ];
+    if (diag.isNotEmpty) sb.write('[${diag.join(' ')}] ');
+    try {
+      final bytes = <int>[];
+      await for (final chunk in resp) {
+        bytes.addAll(chunk);
+        if (bytes.length >= 400) break;
+      }
+      final text = utf8.decode(bytes.take(400).toList(), allowMalformed: true);
+      sb.write(text);
+    } catch (_) {}
+    final s = sb.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s.length <= 600 ? s : s.substring(0, 600);
+  }
+
+  /// 截断字符串便于诊断展示。
+  static String _short(String s, int max) {
+    final t = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return t.length <= max ? t : '${t.substring(0, max)}…';
   }
 
   /// 读取响应文本（gzip 由 HttpClient 自动解压）。
@@ -520,7 +689,9 @@ class JmClient {
         throw JmHttpException(0, '响应格式异常: 非 JSON 对象');
       }
     } on FormatException {
-      throw JmHttpException(0, '响应 JSON 解析失败');
+      // 典型场景：源站异常时返回纯文本（如 mysql 连接失败），
+      // 携带片段便于诊断，并由 _do 轮换下一线路重试。
+      throw JmHttpException(0, '响应非 JSON: ${_short(body, 80)}');
     }
 
     final code = (envelope['code'] as num?)?.toInt() ?? 0;
@@ -638,22 +809,41 @@ class JmClient {
   }
 
   /// `/chapter_view_template` 请求（特殊签名，对齐 qt GetHeader2）。
+  ///
+  /// 同样走多级线路尝试（普通线路 → 反代），避免单点失败。
   Future<JmResponse> getScramble(String epsId) async {
     await _ensureReady();
-    final url = _apiUrl('chapter_view_template', <String, dynamic>{
+    final attempts = _buildAttempts('chapter_view_template', <String, dynamic>{
       'id': epsId,
       'mode': 'vertical',
       'page': '0',
       'app_img_shunt': 'NaN',
-    });
-    final resp = await _send(
-      'GET',
-      Uri.parse(url),
-      headers: _scrambleHeaders(),
-    );
-    final body = await _readText(resp);
-    // 该接口返回 HTML（var scramble_id = NNNN;），不走加密信封
-    return JmResponse(code: 200, msg: '', data: body, raw: <String, dynamic>{});
+    }, withLang: false);
+    Object? lastCause;
+    for (final a in attempts.take(3)) {
+      try {
+        final resp = await _send(
+          'GET',
+          Uri.parse(a.url),
+          headers: _scrambleHeaders(),
+          forceDoh: a.forceDoh,
+        );
+        final body = await _readText(resp);
+        // 该接口返回 HTML（var scramble_id = NNNN;），不走加密信封
+        if (body.contains('scramble_id')) {
+          return JmResponse(
+            code: 200,
+            msg: '',
+            data: body,
+            raw: const <String, dynamic>{},
+          );
+        }
+        lastCause = JmHttpException(0, '排版响应异常: ${_short(body, 60)}');
+      } catch (e) {
+        lastCause = e;
+      }
+    }
+    throw JmHttpException(0, '排版签名获取失败: $epsId', lastCause);
   }
 
   /// Web 端 GET（注册/验证码等，Web 域名）。

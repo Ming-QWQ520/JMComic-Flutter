@@ -43,6 +43,10 @@ class ErrorView extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final detail = error?.toString();
+    // 全线路 400/403：当前网络 IP 被站点边缘拦截，给出可操作建议
+    final blocked =
+        detail != null &&
+        (detail.contains('=>400') || detail.contains('=>403'));
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -96,6 +100,26 @@ class ErrorView extends StatelessWidget {
                     fontSize: 11.5,
                     fontFamily: 'monospace',
                   ),
+                ),
+              ),
+            ],
+            if (blocked) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                constraints: const BoxConstraints(maxWidth: 340),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  '当前网络 IP 可能被站点拦截（已自动尝试全部线路、官方反代与 DoH 直连）。'
+                  '请尝试：切换 WiFi/流量、关闭代理或 VPN，或校准系统时间后重试。',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: cs.onSurfaceVariant, fontSize: 11.5),
                 ),
               ),
             ],
