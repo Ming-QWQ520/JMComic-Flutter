@@ -163,16 +163,23 @@ class JmClient {
   }
 
   /// 构造带协议头的请求头。
-  Map<String, String> _headers({String? contentType}) {
+  ///
+  /// 返回的记录同时携带本次请求的时间戳 [ts]，
+  /// 服务端用同一 ts 派生 AES 密钥加密响应 data，解密时必须使用它。
+  ({Map<String, String> headers, String ts}) _headers(
+      {String? contentType}) {
     final t = JmCrypto.randomToken();
-    return <String, String>{
-      'User-Agent': JmCrypto.userAgent,
-      'Tokenparam': t.tokenparam,
-      'Token': t.token,
-      if (_jwt.isNotEmpty) 'Authorization': 'Bearer $_jwt',
-      if (_avs.isNotEmpty) 'Cookie': 'AVS=$_avs',
-      'Content-Type': ?contentType,
-    };
+    return (
+      headers: <String, String>{
+        'User-Agent': JmCrypto.userAgent,
+        'Tokenparam': t.tokenparam,
+        'Token': t.token,
+        if (_jwt.isNotEmpty) 'Authorization': 'Bearer $_jwt',
+        if (_avs.isNotEmpty) 'Cookie': 'AVS=$_avs',
+        'Content-Type': ?contentType,
+      },
+      ts: t.ts,
+    );
   }
 
   /// 编码 GET query（过滤空值，自动补 lang）。
@@ -210,8 +217,9 @@ class JmClient {
 
     for (var attempt = 0; attempt < 4; attempt++) {
       try {
-        final headers = _headers(contentType: contentType);
-        final req = http.Request(method, url)..headers.addAll(headers);
+        // 每次尝试生成新 Token/ts；解密必须使用本次请求的 ts。
+        final h = _headers(contentType: contentType);
+        final req = http.Request(method, url)..headers.addAll(h.headers);
         if (body != null && body.isNotEmpty) req.body = body;
         final resp = await _http.send(req).timeout(const Duration(seconds: 20));
 
@@ -226,7 +234,7 @@ class JmClient {
           }
           continue; // 非 401/400 重试
         }
-        return _decryptResponse(path, respBody.body);
+        return _decryptResponse(path, respBody.body, h.ts);
       } on JmApiException {
         rethrow;
       } on JmHttpException {
@@ -245,7 +253,10 @@ class JmClient {
   String _truncate(String s) => s.length <= 200 ? s : s.substring(0, 200);
 
   /// 解密响应信封 `{"code":..,"msg":"..","data":"<base64密文>"}`。
-  JmResponse _decryptResponse(String path, String body) {
+  ///
+  /// [ts] 为本次请求 Tokenparam 中的秒级时间戳，与请求时的签名一致；
+  /// 服务端以此派生 AES 密钥，传错将导致所有加密响应解密失败。
+  JmResponse _decryptResponse(String path, String body, String ts) {
     Map<String, dynamic> envelope;
     try {
       final decoded = json.decode(body);
@@ -278,7 +289,7 @@ class JmClient {
 
     final isAd =
         path.contains('ad_content_all') || path.contains('advertise_all');
-    final plain = JmCrypto.decryptData(data, '', isAd);
+    final plain = JmCrypto.decryptData(data, ts, isAd);
     if (plain == null) {
       // 尝试明文解析（少数接口直接返回明文 JSON 字符串）
       try {
@@ -336,7 +347,7 @@ class JmClient {
       url = url.replace(queryParameters: q);
     }
     final resp = await _http
-        .get(url, headers: _headers())
+        .get(url, headers: _headers().headers)
         .timeout(const Duration(seconds: 30));
     if (resp.statusCode != 200) {
       throw JmHttpException(resp.statusCode, '图片下载失败: $rawUrl');

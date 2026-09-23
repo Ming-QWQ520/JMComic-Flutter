@@ -38,14 +38,14 @@ class JmCrypto {
 
   /// APK 内置的兜底主机配置（加密 Base64）。
   /// 原文为 `{"Setting":[...],"Server":[...],"jm3_Server":[[host,線路名]...]}`。
-  static const String backupHostCode = 'X+bnzYIcwF6C7Rd3T7njPM0aeKgOoB+o/+lwS/'
-      'klMzdv/yrVPk0UikahXv/MGxHqaSCwOCfGQjX0QpMpSxvr4+vsg/4ohUY8jspsJ7gSoQU5A'
-      'NBMM99J2WtKxGgIBLq9PjCaS/34KK9HSiLJdaXz40oGSEHkBl8L0tTfPRC+dmPlp2CJ/97a'
-      'nZkSqForX+hTFgVoS0BZl/gXUQdF2njjAjgJwg13qbTJd3QB0CExaztlrC1Z1QGhXNjxM0Z'
-      'k5v8i8JoPtTe7LWW55r96oLJrDOG60uspZxlV+Jp3FOdRXFH++Mann1Vo88iv9kbTa1f1Fk'
-      'aUCEgPpxNKmnCpnNUhNgCZExIlg7RcQQ6Ru+ys1D4+GAhA3Z1gUDMsYIit/bD8H30ZoBip5'
-      '9iW0Nx4haPYM5Pb9GyYRAkIJfQRP46w1JQXMPir0MCxMnvFahb0xzOULRx+WBrOe/oMKD1D'
-      'sohhxw==';
+  /// 与线上 newsvr-2025.txt 同步，主机变更时需更新。
+  static const String backupHostCode = 'X+bnzYIcwF6C7Rd3T7njPDNH08zsH9zyqCrrjCr7qcnHb1LsmIZGIHtrN'
+      'VR/GiraHE6OuhvrxEzwciVvhdU0I9OYcmWTxF1K7fLfcwkn7kMQg2DZ2qpE7dKGkqKCmQ'
+      'ijaSUOswxL1/p9pSVe/vRYEzbB5pfcAB6Yz/zVVIendBJK629QiqQndRXM9bijtZuYJt'
+      'Kw3YBAA26a+fy06dNszfw9v/4R8akVaSTWLOJc0nJy+9vm2t2W997vcqFL91iklKuKVE'
+      'ZHTtdpaLTgWExXaLjtIz2zlVZfy3jYrzKZ7x+LL7o02c6WB4HV69s1VqCJYl+3l3RNwD'
+      'jJ0iRNnG9p/caZL/y6sT8i78Wc38WZhOAxkDsOFiGNpvS3eojKA0wGhpTtWsuUrXgSZ7'
+      'ilEPttJvOhrJGGRJJ7Ux4HgzDYO1A=';
 
   /// MD5 的小写 hex 表示。
   static String md5Hex(String s) => md5.convert(utf8.encode(s)).toString();
@@ -76,19 +76,34 @@ class JmCrypto {
 
   /// 解密接口响应 data 字段。
   ///
-  /// [encrypted] 为 Base64 密文字符串；[ts] 为请求时的时间戳；
+  /// [encrypted] 为 Base64 密文字符串；[ts] 为请求 Tokenparam 中的时间戳；
   /// [isAd] 标记广告类接口（使用不带时间戳的固定密钥）。
-  /// 依次尝试 tokenSecret / contentSecret 两个密钥，解密成功且为合法 JSON 才返回。
+  /// 常规接口依次尝试 md5(ts+密钥) / md5(密钥) 两组密钥，
+  /// 解密成功且为合法 JSON 才返回。
   static String? decryptData(String encrypted, String ts, bool isAd) {
     final secrets = <String>[tokenSecret, contentSecret];
+    if (isAd) {
+      for (final s in secrets) {
+        final plain = decryptBase64Aes(encrypted, md5Hex(s));
+        if (plain != null && _looksJson(plain)) return plain;
+      }
+      return null;
+    }
     for (final s in secrets) {
-      final keyHex = isAd ? md5Hex(s) : md5Hex(ts + s);
-      final plain = decryptBase64Aes(encrypted, keyHex);
-      if (plain == null) continue;
-      final t = plain.trimLeft();
-      if (t.startsWith('{') || t.startsWith('[')) return plain;
+      final plain = decryptBase64Aes(encrypted, md5Hex(ts + s));
+      if (plain != null && _looksJson(plain)) return plain;
+    }
+    for (final s in secrets) {
+      final plain = decryptBase64Aes(encrypted, md5Hex(s));
+      if (plain != null && _looksJson(plain)) return plain;
     }
     return null;
+  }
+
+  /// 判断解密结果是否以 JSON 起始。
+  static bool _looksJson(String s) {
+    final t = s.trimLeft();
+    return t.startsWith('{') || t.startsWith('[');
   }
 
   /// 解密远程主机配置文件内容。
