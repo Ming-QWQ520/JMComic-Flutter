@@ -124,7 +124,7 @@ class AlbumGridState extends State<AlbumGrid> {
           crossAxisSpacing: 12,
           childAspectRatio: 0.55,
         ),
-        itemCount: _items.length + (_noMore ? 1 : 1),
+        itemCount: _items.length + 1,
         itemBuilder: (context, i) {
           if (i >= _items.length) {
             if (_failed) {
@@ -135,7 +135,9 @@ class AlbumGridState extends State<AlbumGrid> {
                 ),
               );
             }
-            return const TailLoader();
+            // _noMore 时展示“已经到底啦”，否则展示加载圈。
+            // 修复：此前 done 恒为 false，最后一页之后永远显示加载圈。
+            return TailLoader(done: _noMore);
           }
           final a = _items[i];
           return AlbumCard(

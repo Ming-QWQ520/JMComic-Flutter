@@ -92,20 +92,18 @@ class _SearchPageState extends State<SearchPage>
     final k = (kw ?? _ctrl.text).trim();
     if (k.isEmpty) return;
     _focus.unfocus();
+    // 同步重建网格（带新 key 强制刷新），避免先置空再异步重建
+    // 造成的“热门搜索页闪一下”的显示异常。
     setState(() {
       _keyword = k;
       _ctrl.text = k;
       _total = '';
-      _grid = null; // 先重建 key，确保强制刷新
-    });
-    await context.read<AppState>().addSearchHistory(k);
-    if (!mounted) return;
-    setState(() {
       _grid = AlbumGrid(
         key: ValueKey<String>('search-$k-$_order-$_searchType'),
         fetchPage: _fetch,
       );
     });
+    await context.read<AppState>().addSearchHistory(k);
   }
 
   Future<List<SearchAlbum>?> _fetch(int page) async {
@@ -188,13 +186,19 @@ class _SearchPageState extends State<SearchPage>
                     padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
                     child: Row(
                       children: [
-                        Text(
-                          '「$_keyword」',
-                          style: tt.labelMedium?.copyWith(
-                            color: cs.primary,
-                            fontWeight: FontWeight.w700,
+                        // Flexible + ellipsis：长关键词不再把 Row 撑出溢出条纹。
+                        Flexible(
+                          child: Text(
+                            '「$_keyword」',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: tt.labelMedium?.copyWith(
+                              color: cs.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
+                        const SizedBox(width: 4),
                         Text(
                           '共 $_total 个结果',
                           style: tt.labelMedium?.copyWith(

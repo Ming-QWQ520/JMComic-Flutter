@@ -8,6 +8,7 @@ import 'pages/download/local_reader_page.dart';
 import 'pages/home/week_page.dart';
 import 'pages/reader/reader_page.dart';
 import 'pages/search/search_page.dart';
+import 'pages/user/login_page.dart';
 import 'shell/root_page.dart';
 import 'state/app_state.dart';
 
@@ -70,6 +71,11 @@ class JmComicApp extends StatelessWidget {
                   SearchPage(initialQuery: q is String ? q : ''),
                   settings,
                 );
+              case '/login':
+                // 详情页/评论页未登录时 pushNamed('/login')。
+                // 此前缺失该分支会落入 default 再压入一个完整 RootPage，
+                // 表现为叠在当前页上的“第二个底部导航栏”。
+                return _fade<void>(const LoginPage(), settings);
               default:
                 return _fade<void>(const RootPage(), settings);
             }

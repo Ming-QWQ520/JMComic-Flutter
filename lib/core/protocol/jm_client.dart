@@ -340,7 +340,8 @@ class JmClient {
       'version': JmCrypto.clientVersion,
       if (auth && _jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
       if (auth && _avs.isNotEmpty) 'cookie': 'AVS=$_avs',
-      if (contentType != null) 'Content-Type': contentType,
+      // null-aware 元素：contentType 为 null 时不产生该键
+      'Content-Type': ?contentType,
     };
   }
 
@@ -685,7 +686,12 @@ class JmClient {
       throw JmHttpException(0, '响应非 JSON: ${_short(body, 80)}');
     }
 
-    final code = (envelope['code'] as num?)?.toInt() ?? 0;
+    // code 可能是数字或字符串（不同线路返回不一致），统一安全解析；
+    // 直接 as num? 在字符串形态下会抛 TypeError，被上层误报为网络错误。
+    final rawCode = envelope['code'];
+    final int code = rawCode is num
+        ? rawCode.toInt()
+        : int.tryParse('$rawCode') ?? 0;
     final msg =
         (envelope['msg'] ?? envelope['errorMsg'] ?? envelope['message'] ?? '')
             .toString();

@@ -8,6 +8,17 @@ library;
 String _s(dynamic v, [String def = '']) {
   if (v == null) return def;
   if (v is String) return v;
+  // 服务端部分字段（如 author）可能返回数组：[a, b] 直接 toString()
+  // 会渲染成 "[a, b]" 乱码，这里规范为逗号分隔的纯文本。
+  if (v is List) {
+    return v
+        .map((e) => e is Map ? (e['name'] ?? e['tag'] ?? '').toString() : e.toString())
+        .where((s) => s.isNotEmpty)
+        .join(', ');
+  }
+  if (v is Map) {
+    return (v['name'] ?? v['tag'] ?? '').toString();
+  }
   return v.toString();
 }
 

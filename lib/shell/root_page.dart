@@ -19,6 +19,10 @@ class _RootPageState extends State<RootPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // 键盘弹起时隐藏底部导航栏（对齐主流 App 行为）。Scaffold 默认会把
+    // bottomNavigationBar 顶到键盘上方悬浮（viewInsets 补偿），导致搜索页
+    // 可用区域被压扁、导航栏"悬空"在键盘上，表现为底部导航栏显示异常。
+    final bool keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     return Scaffold(
       body: IndexedStack(
         index: _index,
@@ -31,7 +35,9 @@ class _RootPageState extends State<RootPage> {
       ),
       // Scaffold 会自动在 NavigationBar 下方垫 MediaQuery.viewPadding.bottom
       // （系统手势条高度），保证 edge-to-edge 下底栏不被遮挡。
-      bottomNavigationBar: Container(
+      bottomNavigationBar: keyboardVisible
+          ? null
+          : Container(
         decoration: BoxDecoration(
           border: Border(
             top: BorderSide(
