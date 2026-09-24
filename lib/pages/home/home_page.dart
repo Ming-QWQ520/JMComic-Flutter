@@ -106,6 +106,12 @@ class _HomePageState extends State<HomePage>
                 icon: const Icon(Icons.casino_outlined),
                 onPressed: _openRandom,
               ),
+              // 右上角固定搜索入口：跳转 /search 路由（独立搜索页）。
+              IconButton(
+                tooltip: '搜索',
+                icon: const Icon(Icons.search_rounded),
+                onPressed: () => Navigator.pushNamed(context, '/search'),
+              ),
               const SizedBox(width: 6),
             ],
           ),

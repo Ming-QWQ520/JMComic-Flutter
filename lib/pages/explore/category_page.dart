@@ -72,6 +72,12 @@ class _CategoryPageState extends State<CategoryPage>
             icon: const Icon(Icons.refresh_rounded),
             onPressed: _load,
           ),
+          // 右上角搜索入口，与首页保持一致。
+          IconButton(
+            tooltip: '搜索',
+            icon: const Icon(Icons.search_rounded),
+            onPressed: () => Navigator.pushNamed(context, '/search'),
+          ),
           const SizedBox(width: 6),
         ],
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
@@ -25,6 +26,24 @@ class JmComicApp extends StatelessWidget {
           darkTheme: AppTheme.dark(scheme),
           themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
           debugShowCheckedModeBanner: false,
+          // 系统栏样式随主题亮度切换：浅色主题用深色图标、深色主题用浅色
+          // 图标。edge-to-edge 下系统手势条/三键导航直接叠在应用底栏上，
+          // 若图标亮度与底栏背景不匹配会导致"底部导航栏不可见"。
+          builder: (BuildContext context, Widget? child) {
+            final Brightness iconBrightness =
+                scheme.isDark ? Brightness.light : Brightness.dark;
+            return AnnotatedRegion<SystemUiOverlayStyle>(
+              value: SystemUiOverlayStyle(
+                statusBarColor: Colors.transparent,
+                statusBarIconBrightness: iconBrightness,
+                systemNavigationBarColor: Colors.transparent,
+                systemNavigationBarIconBrightness: iconBrightness,
+                systemNavigationBarDividerColor: Colors.transparent,
+                systemNavigationBarContrastEnforced: false,
+              ),
+              child: child!,
+            );
+          },
           supportedLocales: const <Locale>[
             Locale('zh', 'CN'),
             Locale('en', 'US'),
