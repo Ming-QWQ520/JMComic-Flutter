@@ -348,8 +348,20 @@ class JmClient {
   /// 图片请求头（对齐 qt DownloadBookReq：仅 Accept-Encoding，
   /// 不带 token/authorization，避免 CF 缓存 BYPASS 回源）。
   Map<String, String> _imgHeaders() {
-    return <String, String>{'accept-encoding': 'identity'};
+    return <String, String>{
+      // 关键修复：必须携带浏览器/官方 APP UA。缺省时 dart:io 会发送
+      // "Dart/x.x (dart:io)"，部分 CDN/WAF 会拦截该 UA 并返回网页
+      // 反爬验证页，字节进入图片解码器即报 DecodeException
+      // 'unimplemented'（log.txt 中的 Failed to decode image）。
+      'user-agent': 'okhttp/3.12.0',
+      'accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      'accept-encoding': 'identity',
+    };
   }
+
+  /// 供 cached_network_image 等 Flutter 侧图片加载使用的请求头
+  /// （与原生图片下载保持一致，避免同样的反爬拦截问题）。
+  Map<String, String> get imgHttpHeaders => _imgHeaders();
 
   /// `/chapter_view_template` 专用签名头（对齐 qt GetHeader2）。
   Map<String, String> _scrambleHeaders() {
@@ -887,6 +899,41 @@ class JmClient {
     );
   }
 
+  /// 校验字节是否为可识别的图片格式（魔数检查）。
+  ///
+  /// CDN 被 WAF 拦截时会返回 200 + HTML/JSON 反爬页，此类响应
+  /// 若直接交给解码器会静默失败（DecodeException）。在此处拦截，
+  /// 视为本次尝试失败并轮换到下一图片线路。
+  static bool _looksLikeImage(List<int> b) {
+    if (b.length < 12) return false;
+    // JPEG：FF D8 FF
+    if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true;
+    // PNG：89 50 4E 47
+    if (b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47) {
+      return true;
+    }
+    // GIF：GIF8
+    if (b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38) {
+      return true;
+    }
+    // WEBP：RIFF....WEBP
+    if (b[0] == 0x52 &&
+        b[1] == 0x49 &&
+        b[2] == 0x46 &&
+        b[3] == 0x46 &&
+        b[8] == 0x57 &&
+        b[9] == 0x45 &&
+        b[10] == 0x42 &&
+        b[11] == 0x50) {
+      return true;
+    }
+    // ISO-BMFF 容器（AVIF/HEIF）：....ftyp
+    if (b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 && b[7] == 0x70) {
+      return true;
+    }
+    return false;
+  }
+
   /// 图片下载（图片域名轮询 + 失败自动切换，对齐 qt DownloadBookReq）。
   ///
   /// [rawUrl] 形如 `/media/photos/{epsId}/{name}`、
@@ -922,6 +969,10 @@ class JmClient {
       // 空白图检测（对齐 qt SPACE_PIC：出现空白图片则视为失败回源）
       if (bytes.isEmpty || (bytes.length < 3000 && !urlStr.contains('?'))) {
         throw JmHttpException(0, '空白图');
+      }
+      // 魔数校验：拦截 200 状态下的反爬网页/垃圾响应，换线路重试
+      if (!_looksLikeImage(bytes)) {
+        throw JmHttpException(0, '非图片响应（可能被 CDN 拦截）');
       }
       return bytes;
     }

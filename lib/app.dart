@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
@@ -27,12 +28,27 @@ class JmComicApp extends StatelessWidget {
           darkTheme: AppTheme.dark(scheme),
           themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
           debugShowCheckedModeBanner: false,
+          // 关键修复：必须显式提供本地化委托。此前未配置，新版本 Flutter
+          // 不再自动注入 Material 本地化，导致 TextField/BackButton/Slider
+          // 等组件首次构建时 MaterialLocalizations.of 直接空指针崩溃，
+          // 表现为搜索框/返回键渲染成纯色方块且无法交互（log.txt 已实锤）。
+          localizationsDelegates: const <LocalizationsDelegate<Object>>[
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const <Locale>[
+            Locale('zh', 'CN'),
+            Locale('en', 'US'),
+          ],
+          locale: const Locale('zh', 'CN'),
           // 系统栏样式随主题亮度切换：浅色主题用深色图标、深色主题用浅色
           // 图标。edge-to-edge 下系统手势条/三键导航直接叠在应用底栏上，
           // 若图标亮度与底栏背景不匹配会导致"底部导航栏不可见"。
           builder: (BuildContext context, Widget? child) {
-            final Brightness iconBrightness =
-                scheme.isDark ? Brightness.light : Brightness.dark;
+            final Brightness iconBrightness = scheme.isDark
+                ? Brightness.light
+                : Brightness.dark;
             return AnnotatedRegion<SystemUiOverlayStyle>(
               value: SystemUiOverlayStyle(
                 statusBarColor: Colors.transparent,
@@ -45,10 +61,6 @@ class JmComicApp extends StatelessWidget {
               child: child!,
             );
           },
-          supportedLocales: const <Locale>[
-            Locale('zh', 'CN'),
-            Locale('en', 'US'),
-          ],
           onGenerateRoute: (RouteSettings settings) {
             switch (settings.name) {
               case '/album':

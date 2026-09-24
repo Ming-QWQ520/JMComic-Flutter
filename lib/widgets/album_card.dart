@@ -14,14 +14,18 @@ class AlbumCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    final badge =
-        album.categorySub.title.isNotEmpty
-            ? album.categorySub.title
-            : album.category.title;
+    final badge = album.categorySub.title.isNotEmpty
+        ? album.categorySub.title
+        : album.category.title;
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
-      onTap: onTap,
+      // 关键修复：onTap 为空时默认跳转详情页。此前首页横滑分区
+      // 未传 onTap，InkWell 收到 null 直接吞掉点击，表现为
+      // "首页无法点击观看漫画"。
+      onTap:
+          onTap ??
+          () => Navigator.pushNamed(context, '/album', arguments: album),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

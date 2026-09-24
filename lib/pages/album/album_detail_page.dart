@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
+import '../../core/protocol/jm_client.dart';
 import '../../core/protocol/models.dart';
 import '../../services/download_manager.dart';
 import '../../state/app_state.dart';
@@ -42,8 +43,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   String get _coverUrl {
     if (_album != null) {
-      return _api.coverUrl(_album!.id.toString(),
-          updateAt: _album!.updateAt);
+      return _api.coverUrl(_album!.id.toString(), updateAt: _album!.updateAt);
     }
     return '';
   }
@@ -83,9 +83,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     try {
       await _api.addFavorite(a.id.toString());
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(a.isFavorite ? '已移出收藏' : '收藏成功')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(a.isFavorite ? '已移出收藏' : '收藏成功')));
       setState(() => a.isFavorite = !a.isFavorite);
     } catch (e) {
       if (!mounted) return;
@@ -146,18 +146,21 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 
   void _needLogin() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('请先登录')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('请先登录')));
     Navigator.pushNamed(context, '/login');
   }
 
   void _openReader({String chapterId = ''}) {
-    Navigator.pushNamed(context, '/reader', arguments: <String, String>{
-      'albumId': _album!.id.toString(),
-      'chapterId': chapterId.isEmpty ? _album!.id.toString() : chapterId,
-      'title': _album!.name,
-    });
+    Navigator.pushNamed(
+      context,
+      '/reader',
+      arguments: <String, String>{
+        'albumId': _album!.id.toString(),
+        'chapterId': chapterId.isEmpty ? _album!.id.toString() : chapterId,
+        'title': _album!.name,
+      },
+    );
   }
 
   void _openComments() {
@@ -165,10 +168,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     Navigator.push(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => AlbumCommentPage(
-          albumId: a.id.toString(),
-          albumName: a.name,
-        ),
+        builder: (_) =>
+            AlbumCommentPage(albumId: a.id.toString(), albumName: a.name),
       ),
     );
   }
@@ -197,8 +198,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     final tt = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: Text(_album?.name ?? _fallback?.name ?? '详情',
-            maxLines: 1, overflow: TextOverflow.ellipsis),
+        title: Text(
+          _album?.name ?? _fallback?.name ?? '详情',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         actions: <Widget>[
           IconButton(
             tooltip: '评论',
@@ -220,8 +224,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       body: _loading
           ? const LoadingView()
           : _error.isNotEmpty
-              ? ErrorView(message: _error, onRetry: _load)
-              : _buildBody(context, cs, tt),
+          ? ErrorView(message: _error, onRetry: _load)
+          : _buildBody(context, cs, tt),
     );
   }
 
@@ -245,10 +249,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                       ? Container(color: cs.surfaceContainerHighest)
                       : CachedNetworkImage(
                           imageUrl: _coverUrl,
+                          // 与原生图片下载相同的请求头（UA 等），避免
+                          // CDN/WAF 拦截导致解码失败。
+                          httpHeaders: JmClient.instance.imgHttpHeaders,
                           fit: BoxFit.cover,
                           memCacheWidth: 360,
-                          errorWidget: (_, _, _) => Container(
-                              color: cs.surfaceContainerHighest),
+                          errorWidget: (_, _, _) =>
+                              Container(color: cs.surfaceContainerHighest),
                         ),
                 ),
               ),
@@ -258,32 +265,53 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(a.name,
-                      style: tt.titleMedium
-                          ?.copyWith(fontWeight: FontWeight.w800)),
+                  Text(
+                    a.name,
+                    style: tt.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.person_outline_rounded,
-                          size: 14, color: cs.onSurfaceVariant),
+                      Icon(
+                        Icons.person_outline_rounded,
+                        size: 14,
+                        color: cs.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 4),
                       Expanded(
-                        child: Text('作者: ${a.authorText}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: tt.bodySmall
-                                ?.copyWith(color: cs.onSurfaceVariant)),
+                        child: Text(
+                          '作者: ${a.authorText}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: tt.bodySmall?.copyWith(
+                            color: cs.onSurfaceVariant,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 10),
                   Row(
                     children: <Widget>[
-                      _Stat(icon: Icons.visibility_outlined, label: '浏览', value: a.totalViews),
+                      _Stat(
+                        icon: Icons.visibility_outlined,
+                        label: '浏览',
+                        value: a.totalViews,
+                      ),
                       const SizedBox(width: 14),
-                      _Stat(icon: Icons.favorite_rounded, label: '喜欢', value: a.totalLikes),
+                      _Stat(
+                        icon: Icons.favorite_rounded,
+                        label: '喜欢',
+                        value: a.totalLikes,
+                      ),
                       const SizedBox(width: 14),
-                      _Stat(icon: Icons.auto_stories_outlined, label: '页数', value: '${a.totalPhotos}'),
+                      _Stat(
+                        icon: Icons.auto_stories_outlined,
+                        label: '页数',
+                        value: '${a.totalPhotos}',
+                      ),
                     ],
                   ),
                   const SizedBox(height: 10),
@@ -294,9 +322,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                       if (a.category.title.isNotEmpty)
                         Pill(label: a.category.title),
                       if (a.categorySub.title.isNotEmpty)
-                        Pill(
-                            label: a.categorySub.title,
-                            color: cs.tertiary),
+                        Pill(label: a.categorySub.title, color: cs.tertiary),
                     ],
                   ),
                 ],
@@ -347,8 +373,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         if (a.description.isNotEmpty) ...<Widget>[
           const SizedBox(height: 20),
           SectionHeader(title: '简介'),
-          Text(a.description,
-              style: tt.bodyMedium?.copyWith(height: 1.65)),
+          Text(a.description, style: tt.bodyMedium?.copyWith(height: 1.65)),
         ],
         // ---------- 标签 ----------
         if (a.tags.isNotEmpty) ...<Widget>[
@@ -358,16 +383,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             spacing: 8,
             runSpacing: 8,
             children: a.tags
-                .map((String t) => ActionChip(
-                      label: Text(t),
-                      labelStyle: TextStyle(fontSize: 12, color: cs.primary),
-                      visualDensity: VisualDensity.compact,
-                      side: BorderSide(
-                          color: cs.primary.withValues(alpha: 0.35)),
-                      onPressed: () => Navigator.pushNamed(
-                          context, '/search',
-                          arguments: t),
-                    ))
+                .map(
+                  (String t) => ActionChip(
+                    label: Text(t),
+                    labelStyle: TextStyle(fontSize: 12, color: cs.primary),
+                    visualDensity: VisualDensity.compact,
+                    side: BorderSide(color: cs.primary.withValues(alpha: 0.35)),
+                    onPressed: () =>
+                        Navigator.pushNamed(context, '/search', arguments: t),
+                  ),
+                )
                 .toList(),
           ),
         ],
@@ -380,8 +405,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 dense: true,
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 2,
+                ),
                 leading: Container(
                   width: 34,
                   height: 34,
@@ -393,14 +420,21 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   child: Text(
                     s.sort,
                     style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: cs.primary),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: cs.primary,
+                    ),
                   ),
                 ),
-                title: Text(s.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: Icon(Icons.chevron_right_rounded,
-                    color: cs.onSurfaceVariant),
+                title: Text(
+                  s.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Icon(
+                  Icons.chevron_right_rounded,
+                  color: cs.onSurfaceVariant,
+                ),
                 onTap: () => _openReader(chapterId: s.id),
               ),
             ),
@@ -415,14 +449,24 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 dense: true,
-                leading: Icon(Icons.collections_bookmark_outlined,
-                    color: cs.primary),
-                title: Text(w.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: Icon(Icons.chevron_right_rounded,
-                    color: cs.onSurfaceVariant),
+                leading: Icon(
+                  Icons.collections_bookmark_outlined,
+                  color: cs.primary,
+                ),
+                title: Text(
+                  w.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Icon(
+                  Icons.chevron_right_rounded,
+                  color: cs.onSurfaceVariant,
+                ),
                 onTap: () => Navigator.pushReplacementNamed(
-                    context, '/album',
-                    arguments: w.id),
+                  context,
+                  '/album',
+                  arguments: w.id,
+                ),
               ),
             ),
           ),
@@ -450,8 +494,10 @@ class _Stat extends StatelessWidget {
       children: [
         Icon(icon, size: 14, color: cs.primary),
         const SizedBox(width: 4),
-        Text('$label $value',
-            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+        Text(
+          '$label $value',
+          style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+        ),
       ],
     );
   }
@@ -493,14 +539,19 @@ class _RoundAction extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                size: 20,
-                color: active ? cs.primary : cs.onSurfaceVariant),
+            Icon(
+              icon,
+              size: 20,
+              color: active ? cs.primary : cs.onSurfaceVariant,
+            ),
             const SizedBox(height: 3),
-            Text(label,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: active ? cs.primary : cs.onSurfaceVariant)),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                color: active ? cs.primary : cs.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),

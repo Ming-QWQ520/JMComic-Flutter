@@ -19,12 +19,17 @@ class CoverImage extends StatelessWidget {
       return Container(
         color: Theme.of(context).colorScheme.surfaceContainerHighest,
         alignment: Alignment.center,
-        child: Icon(Icons.image_outlined,
-            color: Theme.of(context).colorScheme.outline),
+        child: Icon(
+          Icons.image_outlined,
+          color: Theme.of(context).colorScheme.outline,
+        ),
       );
     }
     return CachedNetworkImage(
       imageUrl: url,
+      // 与原生图片下载相同的请求头（UA 等），避免 CDN/WAF 拦截
+      // Dart 默认 UA 返回反爬网页导致图片解码失败。
+      httpHeaders: JmClient.instance.imgHttpHeaders,
       fit: fit ?? BoxFit.cover,
       fadeInDuration: const Duration(milliseconds: 180),
       memCacheWidth: 480,
@@ -44,8 +49,7 @@ class CoverImage extends StatelessWidget {
 String resolveCoverUrl(SearchAlbum album) {
   final img = album.image;
   if (img.startsWith('http')) return img;
-  final direct =
-      JmApi.instance.coverUrl(album.id, updateAt: album.updateAt);
+  final direct = JmApi.instance.coverUrl(album.id, updateAt: album.updateAt);
   if (direct.isNotEmpty) return direct;
   if (img.isNotEmpty) {
     final host = JmClient.instance.imgHost;
