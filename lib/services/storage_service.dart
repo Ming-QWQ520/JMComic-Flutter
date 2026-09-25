@@ -47,11 +47,20 @@ class StorageService {
 
   /// 调用系统文件管理器打开文件夹。
   ///
-  /// 原生侧按可用性依次尝试 `resource/directory`、
-  /// `vnd.android.document/directory` 两类意图，全部失败时退回系统
+  /// Android：原生侧按可用性依次尝试系统选择器（resource/directory、
+  /// vnd.android.document/directory 等意图），全部失败时退回系统
   /// "下载"管理器；返回 false 时由调用方提示路径文本兜底。
+  /// Windows：直接调用 explorer.exe 定位到目录。
   static Future<bool> openFolder(String path) async {
     if (path.isEmpty) return false;
+    if (Platform.isWindows) {
+      try {
+        await Process.run('explorer.exe', <String>[path]);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
     if (!isAndroid) return false;
     try {
       return await _channel

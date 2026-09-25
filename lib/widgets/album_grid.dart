@@ -118,6 +118,11 @@ class AlbumGridState extends State<AlbumGrid> {
         controller: _scroll,
         physics: const AlwaysScrollableScrollPhysics(),
         padding: widget.padding,
+        // 性能：网格卡片无需保活；预滚动范围放宽减少滚动白块。
+        // （cacheExtent 在 3.41 后被标记弃用但功能正常，且
+        // ScrollCacheExtent 未被 material 导出，故继续使用。）
+        // ignore: deprecated_member_use
+        cacheExtent: 800,
         gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
           maxCrossAxisExtent: 160,
           mainAxisSpacing: 16,

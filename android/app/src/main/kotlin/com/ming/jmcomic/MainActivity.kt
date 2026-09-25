@@ -150,33 +150,62 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        val attempts = listOf(
+        val flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+            Intent.FLAG_GRANT_READ_URI_PERMISSION
+        val uri = Uri.fromFile(dir)
+
+        // 主意图 + 备选意图统一交给系统选择器（createChooser）：
+        // 不同文件管理器注册的 MIME 各不相同（resource/directory /
+        // vnd.android.document/directory），单发一个意图只能命中
+        // 个别应用（如网易云/夸克），选择器则列出全部可用项由用户挑选。
+        val primary = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "resource/directory")
+            addFlags(flags)
+        }
+        val extras = listOf(
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(Uri.fromFile(dir), "resource/directory")
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                setDataAndType(uri, "vnd.android.document/directory")
+                addFlags(flags)
             },
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(
-                    Uri.fromFile(dir),
-                    "vnd.android.document/directory"
-                )
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                setDataAndType(uri, "resource/folder")
+                addFlags(flags)
             }
         )
-        for (intent in attempts) {
-            try {
-                startActivity(intent)
-                return true
-            } catch (_: Exception) {
-            }
+        val chooser = Intent.createChooser(primary, "选择打开方式").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
         }
-        // 兜底：打开系统"下载"管理器
+        try {
+            startActivity(chooser)
+            return true
+        } catch (_: Exception) {
+        }
+
+        // 兜底 1：SAF 目录选择器，直接定位到下载目录
+        //（Android 8+ 支持 EXTRA_INITIAL_URI 初始位置提示）。
+        try {
+            val saf = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    toSafInitialUri(path)?.let {
+                        putExtra(
+                            android.provider.DocumentsContract.EXTRA_INITIAL_URI,
+                            android.provider.DocumentsContract
+                                .buildDocumentUri(
+                                    "com.android.externalstorage.documents",
+                                    it
+                                )
+                        )
+                    }
+                }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(saf)
+            return true
+        } catch (_: Exception) {
+        }
+
+        // 兜底 2：打开系统"下载"管理器
         return try {
             startActivity(
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
@@ -185,6 +214,19 @@ class MainActivity : FlutterActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /// 把内部存储路径转换为 SAF 的 documentId（如
+    /// /storage/emulated/0/Download/JM-Flutter → primary:Download/JM-Flutter）。
+    /// 不匹配时返回 null（SAF 打开时不带初始位置）。
+    private fun toSafInitialUri(path: String): String? {
+        val p = path.trim().trimEnd('/')
+        val m = Regex("^/storage/emulated/(\\d+)/(.+)$").find(p) ?: return null
+        return if (m.groupValues[1] == "0") {
+            "primary:${m.groupValues[2]}"
+        } else {
+            null
         }
     }
 

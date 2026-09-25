@@ -309,6 +309,23 @@ class JmApi {
   // 历史/购买/每周/连载/博客/签到
   // ===================================================================
 
+  /// 当前用户信息（对齐 qt GetUserprofileReq2 → user_profile）。
+  ///
+  /// 用于购买/收藏/签到等操作后同步余额（J币）、等级等展示字段。
+  /// 服务端响应形态不稳定（data 直接是用户对象或包一层），统一走
+  /// LoginData.fromMapSafe 的宽松解析；失败返回 null 由调用方兜底。
+  Future<LoginData?> getUserProfile() async {
+    final r = await _c.get('user_profile', <String, dynamic>{});
+    final data = r.data;
+    if (data is Map<String, dynamic>) {
+      return LoginData.fromMapSafe(data);
+    }
+    if (data is Map) {
+      return LoginData.fromMapSafe(Map<String, dynamic>.from(data));
+    }
+    return null;
+  }
+
   /// 观看历史。GET watch_list （对齐 GetHistoryReq2）。
   Future<List<SearchAlbum>> getWatchList(int page) async {
     final r = await _c.get('watch_list', <String, dynamic>{

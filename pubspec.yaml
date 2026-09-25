@@ -1,7 +1,7 @@
 name: jmcomic
 description: "JMComic-Flutter: A comic reader app for learning purposes, based on JMcomic-API."
 publish_to: 'none'
-version: 2.1.0+1
+version: 2.2.0+1
 
 environment:
   sdk: ^3.13.0

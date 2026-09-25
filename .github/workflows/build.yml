@@ -1,4 +1,4 @@
-name: Android CI
+name: CI
 
 # 仅手动触发：在 Actions 页面点击 "Run workflow" 或通过 API
 # workflow_dispatch 触发构建（推送/打标签不再自动编译）。
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build Android (APK)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -91,13 +91,66 @@ jobs:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
           name: ${{ startsWith(github.ref, 'refs/tags/v') && format('JMComic-Flutter {0}', github.ref_name) || 'JMComic-Flutter 最新构建' }}
           body: |
-            自动构建产物（直接下载 .apk 即可，无需解压）：
+            自动构建产物（直接下载 .apk / .zip 即可，无需解压）：
             - `universal`：通用版，不确定设备架构时选这个
             - `arm64-v8a`：现代手机（2016 年后绝大多数机型）
             - `armeabi-v7a`：老旧 32 位手机
             - `x86_64`：模拟器 / Chromebook
+            - `windows-x64`：Windows 桌面版（解压后运行 jmcomic.exe）
           files: dist/*.apk
           generate_release_notes: true
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------
+  # Windows 桌面版构建：打包为 zip 后上传 artifact，并在 Android 任务
+  # 完成后追加到同一个 Release（下载即得，无需解压两步）。
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter 3.47.5
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build Windows (release)
+        run: flutter build windows --release
+
+      - name: Pack portable zip
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+?)\+' | ForEach-Object { $_.Matches[0].Groups[1].Value })
+          $out = "dist/JMComic-Flutter-v$version-windows-x64.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $out -Force
+          Get-ChildItem dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JMComic-Flutter-Windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+      # 追加到 Android 任务刚发布/更新的 Release；无 Release 时（异常情况）
+      # 不阻塞，产物仍可从 Actions artifact 下载。
+      - name: Attach to release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG=$(case "$GITHUB_REF" in refs/tags/v*) echo "$GITHUB_REF_NAME" ;; *) echo "latest" ;; esac)
+          gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY" \
+            || echo "::warning::Release $TAG 不存在或上传失败，Windows 产物仅保留在 Actions artifact"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

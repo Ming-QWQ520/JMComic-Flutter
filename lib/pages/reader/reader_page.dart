@@ -387,7 +387,7 @@ class _ReaderPageState extends State<ReaderPage> {
                         ),
                         ButtonSegment<ReadDirection>(
                           value: ReadDirection.rightToLeft,
-                          label: Text('日漫'),
+                          label: Text('从右至左'),
                         ),
                       ],
                       selected: <ReadDirection>{app.readDirection},
@@ -496,9 +496,50 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           ),
           // 顶部弹窗：漫画名称 + 右上角返回
-          if (_barVisible) _buildTopOverlay(),
+          // 弹出/隐藏带动画（上滑淡入 / 上滑淡出），隐藏时不拦截点击。
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: AnimatedSlide(
+              offset: _barVisible
+                  ? Offset.zero
+                  : const Offset(0, -1),
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              child: AnimatedOpacity(
+                opacity: _barVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: !_barVisible,
+                  child: _buildTopOverlay(),
+                ),
+              ),
+            ),
+          ),
           // 底部弹窗：进度条在上方，设置/深浅色在下方
-          if (_barVisible) _buildBottomOverlay(),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: AnimatedSlide(
+              offset: _barVisible
+                  ? Offset.zero
+                  : const Offset(0, 1),
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              child: AnimatedOpacity(
+                opacity: _barVisible ? 1 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: IgnorePointer(
+                  ignoring: !_barVisible,
+                  child: _buildBottomOverlay(),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -614,6 +655,9 @@ class _ReaderPageState extends State<ReaderPage> {
       width: double.infinity,
       alignment: Alignment.topCenter,
       gaplessPlayback: true,
+      // 按屏幕宽度×DPR 解码：长图原图常达数万像素高，
+      // 限制解码尺寸可显著降低内存占用与首次解码耗时。
+      cacheWidth: _decodeWidth,
     );
   }
 
@@ -622,6 +666,15 @@ class _ReaderPageState extends State<ReaderPage> {
     final w = MediaQuery.sizeOf(context).width;
     return (w * 1.4).clamp(320.0, 2400.0);
   }
+
+  /// 上下滚动模式的图片解码宽度（视口宽 × DPR，上限 2048）。
+  int get _decodeWidth {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return (MediaQuery.sizeOf(context).width * dpr).round().clamp(360, 2048);
+  }
+
+  /// 左右/日漫模式的图片解码宽度：预留 2 倍余量供双指缩放。
+  int get _pagedDecodeWidth => _decodeWidth * 2;
 
   /// 左右/日漫模式的单页：整页 contain 居中 + 双指缩放。
   Widget _pageImage(int i) {
@@ -662,7 +715,12 @@ class _ReaderPageState extends State<ReaderPage> {
     return InteractiveViewer(
       maxScale: 4,
       child: Center(
-        child: Image.memory(bytes, fit: BoxFit.contain, gaplessPlayback: true),
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          gaplessPlayback: true,
+          cacheWidth: _pagedDecodeWidth,
+        ),
       ),
     );
   }

@@ -70,6 +70,10 @@ class DownloadManager extends ChangeNotifier {
   /// 并发下载数（对齐 qt config.DownloadThreadNum）。
   int concurrent = 5;
 
+  /// 单任务内图片并行数（提速关键：此前单任务串行下载，
+  /// 单章节漫画只有 1 个任务 → 网络吞吐利用率极低，体感很慢）。
+  int imageConcurrency = 4;
+
   bool _running = false;
   Directory? _baseDir;
 
@@ -79,6 +83,14 @@ class DownloadManager extends ChangeNotifier {
   /// Android 默认下载位置（公共下载目录下的 JM-Flutter 文件夹）。
   static const String androidDefaultBase =
       '/storage/emulated/0/Download/JM-Flutter';
+
+  /// 平台默认下载根目录（设置页展示用）。
+  /// Windows / 桌面端在运行时解析为应用文档目录下的 JM-Flutter。
+  String get defaultBase {
+    if (Platform.isAndroid) return androidDefaultBase;
+    if (Platform.isWindows) return r'C:\Users\<用户名>\Documents\JM-Flutter';
+    return '';
+  }
 
   /// 当前生效的下载根目录路径（解析前也可用于 UI 展示）。
   String get basePath {
@@ -290,24 +302,54 @@ class DownloadManager extends ChangeNotifier {
       final aid = int.tryParse(task.albumId) ?? 0;
       final needScramble = Scramble.needScramble(aid, task.scrambleId);
 
-      for (var i = task.completed; i < task.imageUrls.length; i++) {
-        if (task.status == DownloadStatus.paused) return;
-        final url = task.imageUrls[i];
-        final raw = await JmApi.instance.downloadImage(url);
-        Uint8List bytes = Uint8List.fromList(raw);
-        final isGif = url.toLowerCase().endsWith('.gif');
-        if (needScramble && !isGif) {
-          final name = Scramble.filenameFromUrl(url);
+      // 任务内图片并行下载：多个 worker 抢占下一个未完成页码，
+      // 文件按页码命名，写入顺序无需保证。
+      var next = task.completed;
+      var failedMsg = '';
+
+      Future<void> worker() async {
+        while (task.status != DownloadStatus.paused) {
+          final i = next++;
+          if (i >= task.imageUrls.length) return;
+          final url = task.imageUrls[i];
           try {
-            bytes = await Scramble.descramble(bytes, task.albumId, name);
-          } catch (_) {
-            // 还原失败用原图
+            final raw = await JmApi.instance.downloadImage(url);
+            Uint8List bytes = Uint8List.fromList(raw);
+            final isGif = url.toLowerCase().endsWith('.gif');
+            if (needScramble && !isGif) {
+              final name = Scramble.filenameFromUrl(url);
+              try {
+                bytes = await Scramble.descramble(bytes, task.albumId, name);
+              } catch (_) {
+                // 还原失败用原图
+              }
+            }
+            final f = File('${epsDir.path}/$i.jpg');
+            await f.writeAsBytes(bytes, flush: true);
+            task.tick();
+          } catch (e) {
+            // 单张失败：记录原因继续其余图片，最后标记任务可重试
+            failedMsg = e.toString();
           }
         }
-        final f = File('${epsDir.path}/$i.jpg');
-        await f.writeAsBytes(bytes, flush: true);
-        task.tick();
       }
+
+      final n = imageConcurrency.clamp(1, 8);
+      await Future.wait(
+        List<Future<void>>.generate(n, (_) => worker()),
+      );
+      if (task.status == DownloadStatus.paused) return;
+
+      if (task.completed < task.imageUrls.length) {
+        // 存在未完成图片：标记失败并保留进度，可点击"继续"重试
+        task.setStatus(
+          DownloadStatus.error,
+          failedMsg.isEmpty ? '部分图片下载失败，可点击"继续"重试' : failedMsg,
+        );
+        notifyListeners();
+        return;
+      }
+
       final meta = <String, dynamic>{
         'albumId': task.albumId,
         'albumName': task.albumName,

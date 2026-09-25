@@ -200,7 +200,7 @@ class SettingsPage extends StatelessWidget {
                                 label: Text('左右')),
                             ButtonSegment<ReadDirection>(
                                 value: ReadDirection.rightToLeft,
-                                label: Text('日漫')),
+                                label: Text('从右至左')),
                           ],
                           selected: <ReadDirection>{state.readDirection},
                           onSelectionChanged: (Set<ReadDirection> s) =>
@@ -266,7 +266,7 @@ class SettingsPage extends StatelessWidget {
                     title: const Text('下载位置'),
                     subtitle: Text(
                       state.downloadDir.isEmpty
-                          ? (DownloadManager.androidDefaultBase)
+                          ? DownloadManager.instance.defaultBase
                           : state.downloadDir,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -326,7 +326,7 @@ class SettingsPage extends StatelessWidget {
                     leading: Icon(Icons.info_outline_rounded, size: 20),
                     title: Text('关于'),
                     subtitle: Text(
-                        'JMComic-Flutter v2.1.0\nAPI 协议对齐 tonquer/JMComic-qt'),
+                        'JMComic-Flutter v2.2.0\nAPI 协议对齐 tonquer/JMComic-qt'),
                     isThreeLine: true,
                   ),
                 ],
@@ -370,12 +370,12 @@ class SettingsPage extends StatelessWidget {
         ),
       );
 
-  /// 修改下载根目录（对齐需求：默认 /storage/emulated/0/Download/JM-Flutter，
+  /// 修改下载根目录（Android 默认公共下载目录，桌面端默认文档目录；
   /// 可在设置中修改；留空恢复默认）。
   Future<void> _editDownloadDir(BuildContext context, AppState state) async {
     final ctrl = TextEditingController(
       text: state.downloadDir.isEmpty
-          ? DownloadManager.androidDefaultBase
+          ? DownloadManager.instance.defaultBase
           : state.downloadDir,
     );
     final saved = await showDialog<bool>(

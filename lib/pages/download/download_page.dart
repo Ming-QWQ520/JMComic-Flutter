@@ -303,7 +303,11 @@ class _TaskCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    // 直接监听任务自身：每张图片完成（tick）即刷新进度条与计数，
+    // 修复"必须退出下载页重进才能看到最新进度"的问题。
+    return ListenableBuilder(
+      listenable: task,
+      builder: (BuildContext context, _) => Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         // 多选模式下点击 = 勾选；长按任意卡片进入多选模式。
@@ -418,6 +422,7 @@ class _TaskCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
       ),
     );
   }

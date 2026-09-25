@@ -266,6 +266,27 @@ class AppState extends ChangeNotifier {
     await _store.setJson('user', user.toMap());
   }
 
+  /// 从服务端拉取最新用户信息并本地落盘（购买/签到后同步 J币等）。
+  ///
+  /// 静默失败：拉取失败保留本地旧值，不打断操作流。
+  Future<void> refreshUser() async {
+    if (!isLogged) return;
+    try {
+      final fresh = await api.getUserProfile();
+      if (fresh == null || fresh.id.isEmpty) return;
+      // user_profile 不返回 jwt/AVS，保留本地登录态字段。
+      final map = fresh.toMap()
+        ..['jwttoken'] =
+            _user!.jwtToken.isNotEmpty ? _user!.jwtToken : fresh.jwtToken
+        ..['s'] = _user!.s.isNotEmpty ? _user!.s : fresh.s;
+      final merged = LoginData.fromMap(map);
+      _user = merged;
+      _c.setAuth(merged.jwtToken, merged.s);
+      notifyListeners();
+      await _store.setJson('user', merged.toMap());
+    } catch (_) {}
+  }
+
   Future<void> clearUser() async {
     _user = null;
     _c.setAuth('', '');
