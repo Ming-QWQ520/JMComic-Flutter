@@ -10,6 +10,7 @@ import '../blogs/blogs_page.dart';
 import '../download/download_page.dart';
 import '../settings/settings_page.dart';
 import '../sign/sign_page.dart';
+import 'about_page.dart';
 import 'favorites_page.dart';
 import 'login_page.dart';
 
@@ -91,6 +92,13 @@ class _ProfilePageState extends State<ProfilePage> {
                     context,
                     MaterialPageRoute<void>(
                         builder: (_) => const SettingsPage()))),
+            _tile(context, Icons.info_outline_rounded, '关于项目',
+                '项目介绍 / 作者 / 相关链接 / Star 数',
+                const Color(0xFF0EA5E9),
+                () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                        builder: (_) => const AboutPage()))),
           ]),
           const SizedBox(height: 24),
           Center(

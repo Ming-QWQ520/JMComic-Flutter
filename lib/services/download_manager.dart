@@ -56,7 +56,9 @@ class DownloadTask extends ChangeNotifier {
 /// - 目录结构（默认）：`/storage/emulated/0/Download/JM-Flutter/{漫画号}/{章节ID}/图片`；
 ///   无章节漫画（epsId == albumId）图片直接放在 `JM-Flutter/{漫画号}/` 下，
 ///   即用户约定的 `download/JM-Flutter/[漫画号]/图片` 形态；
-/// - 下载位置可在设置中修改（持久化）；桌面/测试环境回退应用文档目录；
+/// - Windows 默认：`exe所在目录\download\{漫画号}\[{章节ID}\]图片`，
+///   单本漫画直接 `download\{漫画号}\图片`（绿色便携，不写入用户文档）；
+/// - 下载位置可在设置中修改（持久化）；其他平台回退应用文档目录；
 /// - 首次使用前自动检查/申请存储权限（详见 [StorageService]）；
 /// - 并发下载数（对齐 qt DownloadThreadNum = 5）；
 /// - 下载后自动乱序还原为可直读图片（对齐 qt SegmentationPictureToDisk）；
@@ -84,11 +86,17 @@ class DownloadManager extends ChangeNotifier {
   static const String androidDefaultBase =
       '/storage/emulated/0/Download/JM-Flutter';
 
+  /// Windows 默认下载位置：exe 所在目录下的 download 文件夹
+  /// （`{exe目录}\download\{漫画号}\[{章节ID}\]图片`，绿色便携）。
+  static String get windowsDefaultBase {
+    final exeDir = File(Platform.resolvedExecutable).parent.path;
+    return '$exeDir\\download';
+  }
+
   /// 平台默认下载根目录（设置页展示用）。
-  /// Windows / 桌面端在运行时解析为应用文档目录下的 JM-Flutter。
   String get defaultBase {
     if (Platform.isAndroid) return androidDefaultBase;
-    if (Platform.isWindows) return r'C:\Users\<用户名>\Documents\JM-Flutter';
+    if (Platform.isWindows) return windowsDefaultBase;
     return '';
   }
 
@@ -96,7 +104,8 @@ class DownloadManager extends ChangeNotifier {
   String get basePath {
     if (customBasePath.trim().isNotEmpty) return customBasePath.trim();
     if (Platform.isAndroid) return androidDefaultBase;
-    return ''; // 非 Android 平台解析时回退应用文档目录
+    if (Platform.isWindows) return windowsDefaultBase;
+    return ''; // 其他平台解析时回退应用文档目录
   }
 
   Future<Directory> baseDir() async {

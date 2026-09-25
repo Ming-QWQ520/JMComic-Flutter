@@ -47,10 +47,11 @@ class StorageService {
 
   /// 调用系统文件管理器打开文件夹。
   ///
-  /// Android：原生侧按可用性依次尝试系统选择器（resource/directory、
-  /// vnd.android.document/directory 等意图），全部失败时退回系统
-  /// "下载"管理器；返回 false 时由调用方提示路径文本兜底。
-  /// Windows：直接调用 explorer.exe 定位到目录。
+  /// Android：原生侧优先以 SAF content:// 目录 URI（系统"文件管理"可
+  /// 直接定位），并把 file:// 各 MIME 变体作为备选意图一并交给系统
+  /// 选择器（MT 管理器等第三方注册的是 file:// resource/directory），
+  /// 全部失败时退回系统"下载"管理器；返回 false 时由调用方提示路径
+  /// 文本兜底。Windows：直接调用 explorer.exe 定位到目录。
   static Future<bool> openFolder(String path) async {
     if (path.isEmpty) return false;
     if (Platform.isWindows) {
@@ -71,5 +72,54 @@ class StorageService {
     } catch (_) {
       return false;
     }
+  }
+
+  /// 用系统浏览器/外部应用打开链接。
+  ///
+  /// Android：ACTION_VIEW；Windows：cmd start（默认浏览器），
+  /// 失败时回退 explorer。返回 false 表示无可用处理程序。
+  static Future<bool> openUrl(String url) async {
+    if (url.isEmpty) return false;
+    if (Platform.isWindows) {
+      try {
+        await Process.run('cmd.exe', <String>['/c', 'start', '', url]);
+        return true;
+      } catch (_) {
+        try {
+          await Process.run('explorer.exe', <String>[url]);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+    }
+    if (!isAndroid) return false;
+    try {
+      return await _channel
+              .invokeMethod<bool>('openUrl', <String, dynamic>{
+            'url': url,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 调出系统分享面板（详情页分享按钮）。
+  ///
+  /// Android：ACTION_SEND 文本；Windows：复制到剪贴板并提示。
+  static Future<void> shareText(String text, {String title = '分享'}) async {
+    if (text.isEmpty) return;
+    if (Platform.isWindows) {
+      await Clipboard.setData(ClipboardData(text: text));
+      return;
+    }
+    if (!isAndroid) return;
+    try {
+      await _channel.invokeMethod<void>('shareText', <String, dynamic>{
+        'text': text,
+        'title': title,
+      });
+    } catch (_) {}
   }
 }

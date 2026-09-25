@@ -24,6 +24,8 @@ dependencies:
   shared_preferences: ^2.5.3
   # 下载目录（本地下载管理）
   path_provider: ^2.1.4
+  # 自定义背景图选择（Android SAF / Windows 原生文件对话框，纯 Kotlin/C++ 实现，无 NDK）
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

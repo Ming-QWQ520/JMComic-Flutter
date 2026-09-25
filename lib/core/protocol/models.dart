@@ -226,6 +226,7 @@ class Album {
         totalViews = _s(m['total_views']),
         totalLikes = _s(m['likes']),
         totalPhotos = _i(m['total_photos']),
+        commentTotal = _i(m['comment_total']),
         series = listOfMaps(m['series']).map(SeriesItem.fromMap).toList(),
         tags = (m['tags'] as List?)?.map((e) => e.toString()).toList() ?? [],
         category = CategoryRef.fromMap(m['category']),
@@ -243,6 +244,9 @@ class Album {
   final String totalViews;
   final String totalLikes;
   final int totalPhotos;
+
+  /// 评论总数（album 接口 comment_total，部分线路缺省为 0）。
+  final int commentTotal;
   final List<SeriesItem> series;
   final List<String> tags;
   final CategoryRef category;

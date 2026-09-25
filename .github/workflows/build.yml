@@ -1,7 +1,8 @@
-name: CI
+name: CI (Android APK)
 
 # 仅手动触发：在 Actions 页面点击 "Run workflow" 或通过 API
 # workflow_dispatch 触发构建（推送/打标签不再自动编译）。
+# Windows 桌面版构建已拆分至 build-windows.yml，可独立触发。
 on:
   workflow_dispatch:
 
@@ -53,8 +54,10 @@ jobs:
           flutter build apk --release --split-per-abi
 
       - name: Prepare artifacts
+        id: prep
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d '+' -f 1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "dist/JMComic-Flutter-v${VERSION}-armeabi-v7a.apk"
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   "dist/JMComic-Flutter-v${VERSION}-arm64-v8a.apk"
@@ -62,29 +65,55 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk             "dist/JMComic-Flutter-v${VERSION}-universal.apk"
           ls -la dist
 
-      # 产物汇总为单一 artifact：不再每个架构单独显示一个条目。
-      # 注意：从 Actions 页面下载 artifact 时 GitHub 会固定打包成 zip（平台行为，
-      # 无法关闭）；需要不压缩的原始 APK 请直接到 Release 下载（见下一步）。
-      - name: 正在上传产物
+      # 各架构 APK 分别作为独立 artifact 上传（不再合并成一个 zip 包）。
+      # 注：从 Actions 页面下载 artifact 时 GitHub 平台会固定打包成 zip，
+      # 但每个条目内只包含对应架构的单个 APK；需要原始 APK 文件请到
+      # Release 下载（见下一步，Release 资产为未压缩的 .apk 本体）。
+      - name: Upload artifact (universal)
         uses: actions/upload-artifact@v4
         with:
-          name: JMComic-Flutter-APK
-          path: dist/*.apk
+          name: JMComic-Flutter-v${{ steps.prep.outputs.version }}-universal
+          path: dist/JMComic-Flutter-v${{ steps.prep.outputs.version }}-universal.apk
           if-no-files-found: error
           compression-level: 0
 
-      # rolling release：先删除旧的 latest 发布与标签，让其指向最新提交
+      - name: Upload artifact (arm64-v8a)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JMComic-Flutter-v${{ steps.prep.outputs.version }}-arm64-v8a
+          path: dist/JMComic-Flutter-v${{ steps.prep.outputs.version }}-arm64-v8a.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload artifact (armeabi-v7a)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JMComic-Flutter-v${{ steps.prep.outputs.version }}-armeabi-v7a
+          path: dist/JMComic-Flutter-v${{ steps.prep.outputs.version }}-armeabi-v7a.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Upload artifact (x86_64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: JMComic-Flutter-v${{ steps.prep.outputs.version }}-x86_64
+          path: dist/JMComic-Flutter-v${{ steps.prep.outputs.version }}-x86_64.apk
+          if-no-files-found: error
+          compression-level: 0
+
+      # rolling release：先删除旧的 latest 发布与标签，让其指向最新提交。
+      # Windows 产物由 build-windows.yml 独立追加（请在本工作流完成后再
+      # 触发，避免 rolling release 重建时丢失刚附加的 Windows zip）。
       - name: Remove old rolling release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         run: gh release delete latest --yes --cleanup-tag || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 将 4 个 APK 直接上传到 Release：Release 资产是原始 .apk 文件，
-      # 下载即得 APK 本体，不会被压缩成 zip。
+      # 将 4 个 APK 以原始文件形式上传到 Release（非 zip，下载即得）：
       # - push 到 main/master：更新 rolling release（tag=latest）
       # - push v* 标签：发布对应版本的正式 Release
-      - name: 正在上传产物
+      - name: Upload to release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
@@ -102,55 +131,3 @@ jobs:
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ---------------------------------------------------------------------
-  # Windows 桌面版构建：打包为 zip 后上传 artifact，并在 Android 任务
-  # 完成后追加到同一个 Release（下载即得，无需解压两步）。
-  build-windows:
-    name: Build Windows (x64)
-    runs-on: windows-latest
-    needs: build
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter 3.47.5
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: 3.47.5
-          channel: stable
-          cache: true
-
-      - name: Pub get
-        run: flutter pub get
-
-      - name: Build Windows (release)
-        run: flutter build windows --release
-
-      - name: Pack portable zip
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+?)\+' | ForEach-Object { $_.Matches[0].Groups[1].Value })
-          $out = "dist/JMComic-Flutter-v$version-windows-x64.zip"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $out -Force
-          Get-ChildItem dist
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: JMComic-Flutter-Windows
-          path: dist/*.zip
-          if-no-files-found: error
-
-      # 追加到 Android 任务刚发布/更新的 Release；无 Release 时（异常情况）
-      # 不阻塞，产物仍可从 Actions artifact 下载。
-      - name: Attach to release
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          TAG=$(case "$GITHUB_REF" in refs/tags/v*) echo "$GITHUB_REF_NAME" ;; *) echo "latest" ;; esac)
-          gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY" \
-            || echo "::warning::Release $TAG 不存在或上传失败，Windows 产物仅保留在 Actions artifact"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../pages/explore/category_page.dart';
 import '../pages/home/home_page.dart';
 import '../pages/search/search_page.dart';
 import '../pages/user/profile_page.dart';
+import '../state/app_state.dart';
 
 /// 根导航壳：首页 / 分类 / 搜索 / 我的。
 class RootPage extends StatefulWidget {
@@ -19,6 +21,7 @@ class _RootPageState extends State<RootPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final hasBg = context.watch<AppState>().hasCustomBackground;
     // 底部导航栏始终显示。此前“键盘弹起隐藏底栏”的 hack 依赖
     // MediaQuery.viewInsets，在部分机型（如 vivo edge-to-edge）上
     // 会残留幽灵 insets 导致底栏永久消失，表现为“底部导航栏无法
@@ -47,7 +50,9 @@ class _RootPageState extends State<RootPage> {
         child: NavigationBar(
           selectedIndex: _index,
           onDestinationSelected: (int i) => setState(() => _index = i),
-          backgroundColor: cs.surface,
+          // 自定义背景下底栏轻微透出背景图（保持可读性的半透明）。
+          backgroundColor:
+              hasBg ? cs.surface.withValues(alpha: 0.86) : cs.surface,
           surfaceTintColor: cs.surface,
           shadowColor: Colors.transparent,
           destinations: const <Widget>[

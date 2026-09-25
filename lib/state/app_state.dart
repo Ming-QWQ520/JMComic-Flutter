@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import '../core/constants.dart';
@@ -6,6 +8,7 @@ import '../core/protocol/jm_client.dart';
 import '../core/protocol/jm_domain.dart';
 import '../core/protocol/models.dart';
 import '../services/download_manager.dart';
+import '../services/github_service.dart';
 import '../services/local_store.dart';
 
 /// 阅读方向。
@@ -64,6 +67,16 @@ class AppState extends ChangeNotifier {
   String _downloadDir = '';
   String get downloadDir => _downloadDir;
 
+  // ---------- 自定义背景（所有页面，阅读器除外） ----------
+  String _backgroundPath = '';
+  String get backgroundPath => _backgroundPath;
+  bool get hasCustomBackground => _backgroundPath.trim().isNotEmpty;
+
+  // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
+  int? _repoStars;
+  int? get repoStars => _repoStars;
+  bool _starsLoaded = false;
+
   /// 线路测速结果 host -> 毫秒（-1 失败）。
   Map<String, int> speedResults = <String, int>{};
   bool speedTesting = false;
@@ -105,6 +118,12 @@ class AppState extends ChangeNotifier {
       _dohIndex = await _store.getInt('doh_index', 0);
       _downloadDir = await _store.getString('download_dir', '');
       DownloadManager.instance.customBasePath = _downloadDir;
+      _backgroundPath = await _store.getString('custom_background', '');
+      if (_backgroundPath.isNotEmpty && !File(_backgroundPath).existsSync()) {
+        // 背景图文件已被删除/清理：静默回落默认背景。
+        _backgroundPath = '';
+        await _store.remove('custom_background');
+      }
 
       final jwt = await _store.getString('jwt');
       final avs = await _store.getString('avs');
@@ -142,6 +161,27 @@ class AppState extends ChangeNotifier {
       _ready = true;
       notifyListeners();
     }
+
+    // 项目 Star 数：仅在进程冷启动的 init() 里请求一次。
+    // 切后台再回到前台不会重新走 init()，符合"每次进入 APP 请求一次"的
+    // 定义；失败静默（GitHub 在部分网络下不可达，不影响使用）。
+    _fetchRepoStars();
+  }
+
+  /// 拉取 GitHub 仓库 Star 数（fire-and-forget，失败保留 null）。
+  Future<void> _fetchRepoStars() async {
+    if (_starsLoaded) return;
+    _starsLoaded = true;
+    try {
+      final stars = await GithubService.fetchStars(
+        'Ming-QWQ520',
+        'JMComic-Flutter',
+      );
+      if (stars != null) {
+        _repoStars = stars;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ---------- 设置项写入 ----------
@@ -227,6 +267,17 @@ class AppState extends ChangeNotifier {
     DownloadManager.instance.customBasePath = _downloadDir;
     notifyListeners();
     await _store.setString('download_dir', _downloadDir);
+  }
+
+  /// 设置自定义背景图（绝对路径；空串 = 恢复默认背景）。
+  Future<void> setBackground(String path) async {
+    _backgroundPath = path.trim();
+    notifyListeners();
+    if (_backgroundPath.isEmpty) {
+      await _store.remove('custom_background');
+    } else {
+      await _store.setString('custom_background', _backgroundPath);
+    }
   }
 
   /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。

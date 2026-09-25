@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 
 /// 本地离线阅读器（对齐 qt local_read_view）。
 ///
-/// 直接展示已下载到本地的图片文件，交互与在线阅读器一致：
-/// 点击翻页、页码滑杆、缩放。
+/// 直接展示已下载到本地的图片文件；交互与在线阅读器保持一致：
+/// 点击翻页、顶/底渐变弹层（返回键 + 进度滑杆 + 页码指示）、
+/// 弹层出入场动画（上滑/下滑 + 淡入淡出）、双指缩放。
 class LocalReaderPage extends StatefulWidget {
   const LocalReaderPage({super.key});
 
@@ -33,6 +34,12 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
         }
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _pageCtrl.dispose();
+    super.dispose();
   }
 
   void _toggleBar() => setState(() => _barVisible = !_barVisible);
@@ -69,100 +76,181 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
-      extendBody: true,
-      appBar: _barVisible
-          ? AppBar(
-              backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              flexibleSpace: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withValues(alpha: 0.75),
-                      Colors.transparent,
-                    ],
+      body: Stack(
+        children: <Widget>[
+          // 内容层：整页可点击（左/中/右翻页或呼出弹层）
+          Positioned.fill(
+            child: PageView.builder(
+              controller: _pageCtrl,
+              itemCount: _files.length,
+              onPageChanged: (int i) => setState(() => _currentPage = i),
+              itemBuilder: (_, i) {
+                final f = File(_files[i]);
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapUp: (TapUpDetails d) => _onTap(d, context),
+                  child: InteractiveViewer(
+                    maxScale: 4,
+                    child: Center(
+                      child: f.existsSync()
+                          ? Image.file(f,
+                              fit: BoxFit.contain, gaplessPlayback: true)
+                          : const Icon(Icons.broken_image_rounded,
+                              color: Colors.white24, size: 42),
+                    ),
                   ),
-                ),
-              ),
-              title: Text(_title,
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
-            )
-          : null,
-      body: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapUp: (TapUpDetails d) => _onTap(d, context),
-        child: PageView.builder(
-          controller: _pageCtrl,
-          itemCount: _files.length,
-          onPageChanged: (int i) => setState(() => _currentPage = i),
-          itemBuilder: (_, i) {
-            final f = File(_files[i]);
-            return InteractiveViewer(
-              maxScale: 4,
-              child: Center(
-                child: f.existsSync()
-                    ? Image.file(f,
-                        fit: BoxFit.contain, gaplessPlayback: true)
-                    : const Icon(Icons.broken_image_rounded,
-                        color: Colors.white24, size: 42),
-              ),
-            );
-          },
-        ),
+                );
+              },
+            ),
+          ),
+          // 顶部弹层：标题 + 返回（出入场动画，隐藏时不拦截点击）
+          _overlay(top: true, child: _buildTopOverlay()),
+          // 底部弹层：进度滑杆 + 页码指示
+          _overlay(top: false, child: _buildBottomOverlay()),
+        ],
       ),
-      bottomNavigationBar: _barVisible ? _buildBottomBar() : null,
     );
   }
 
-  Widget _buildBottomBar() {
+  /// 顶/底弹层统一包装：出入场 = 上/下滑 + 淡入淡出，
+  /// 隐藏时不拦截点击（与在线阅读器一致）。
+  Widget _overlay({required bool top, required Widget child}) {
+    return Positioned(
+      top: top ? 0 : null,
+      bottom: top ? null : 0,
+      left: 0,
+      right: 0,
+      child: AnimatedSlide(
+        offset: _barVisible
+            ? Offset.zero
+            : (top ? const Offset(0, -1) : const Offset(0, 1)),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: _barVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          child: IgnorePointer(ignoring: !_barVisible, child: child),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopOverlay() {
     return SafeArea(
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [
-              Colors.black.withValues(alpha: 0.85),
-              Colors.black.withValues(alpha: 0.4),
-              Colors.transparent,
+      bottom: false,
+      child: GestureDetector(
+        onTap: () {},
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.8),
+                Colors.transparent,
+              ],
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 4, 8, 12),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(
+                  _title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: '返回',
+                icon: const Icon(Icons.arrow_back_rounded,
+                    color: Colors.white),
+                onPressed: () => Navigator.maybePop(context),
+              ),
             ],
           ),
         ),
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
-        child: Row(
-          children: <Widget>[
-            Text('$_currentPage',
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 2,
-                  thumbShape:
-                      const RoundSliderThumbShape(enabledThumbRadius: 7),
-                  overlayShape:
-                      const RoundSliderOverlayShape(overlayRadius: 14),
-                  activeTrackColor: Theme.of(context).colorScheme.primary,
-                  inactiveTrackColor: Colors.white24,
-                  thumbColor: Colors.white,
-                ),
-                child: Slider(
-                  min: 0,
-                  max: (_files.length - 1).clamp(0, 1 << 30).toDouble(),
-                  value: _currentPage.toDouble(),
-                  onChanged: (double v) {
-                    final i = v.round();
-                    setState(() => _currentPage = i);
-                    _pageCtrl.jumpToPage(i);
-                  },
-                ),
-              ),
+      ),
+    );
+  }
+
+  Widget _buildBottomOverlay() {
+    return SafeArea(
+      top: false,
+      child: GestureDetector(
+        onTap: () {},
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.9),
+                Colors.black.withValues(alpha: 0.55),
+                Colors.transparent,
+              ],
             ),
-            Text('${_files.length}',
-                style: const TextStyle(color: Colors.white70, fontSize: 12)),
-          ],
+          ),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Text('$_currentPage',
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12)),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        trackHeight: 2,
+                        thumbShape:
+                            const RoundSliderThumbShape(enabledThumbRadius: 7),
+                        overlayShape:
+                            const RoundSliderOverlayShape(overlayRadius: 14),
+                        activeTrackColor:
+                            Theme.of(context).colorScheme.primary,
+                        inactiveTrackColor: Colors.white24,
+                        thumbColor: Colors.white,
+                      ),
+                      child: Slider(
+                        min: 0,
+                        max: (_files.length - 1).clamp(0, 1 << 30).toDouble(),
+                        value: _currentPage.toDouble(),
+                        onChanged: (double v) {
+                          final i = v.round();
+                          setState(() => _currentPage = i);
+                          _pageCtrl.jumpToPage(i);
+                        },
+                      ),
+                    ),
+                  ),
+                  Text('${_files.length}',
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 12)),
+                ],
+              ),
+              Row(
+                children: <Widget>[
+                  Text(
+                    '${_currentPage + 1} / ${_files.length}',
+                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                  const Spacer(),
+                  const Text(
+                    '离线阅读',
+                    style: TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

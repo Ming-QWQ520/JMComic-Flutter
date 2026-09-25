@@ -1,4 +1,8 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
@@ -8,6 +12,7 @@ import '../../services/image_store.dart';
 import '../../services/storage_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
+import '../user/about_page.dart';
 
 /// 设置页（对齐 tonquer/JMComic-qt SettingView）。
 ///
@@ -298,6 +303,44 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
+          // ---------- 个性化（自定义背景） ----------
+          SectionHeader(title: '个性化'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.wallpaper_rounded,
+                        size: 20, color: cs.primary),
+                    title: const Text('自定义背景'),
+                    subtitle: Text(
+                      state.hasCustomBackground
+                          ? '已设置（应用于除阅读器外的所有页面）'
+                          : '未设置，使用默认主题背景',
+                    ),
+                    trailing: const Icon(Icons.edit_outlined, size: 18),
+                    onTap: () => _pickBackground(context, state),
+                  ),
+                  if (state.hasCustomBackground)
+                    ListTile(
+                      dense: true,
+                      leading: Icon(Icons.restart_alt_rounded,
+                          size: 20, color: cs.primary),
+                      title: const Text('恢复默认背景'),
+                      onTap: () async {
+                        await state.setBackground('');
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('已恢复默认背景')));
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
           // ---------- 其他 ----------
           SectionHeader(title: '其他'),
           Card(
@@ -321,13 +364,17 @@ class SettingsPage extends StatelessWidget {
                     subtitle: const Text('删除全部已下载章节（不影响收藏）'),
                     onTap: () => _clearDownloads(context),
                   ),
-                  const ListTile(
+                  ListTile(
                     dense: true,
-                    leading: Icon(Icons.info_outline_rounded, size: 20),
-                    title: Text('关于'),
-                    subtitle: Text(
-                        'JMComic-Flutter v2.2.0\nAPI 协议对齐 tonquer/JMComic-qt'),
-                    isThreeLine: true,
+                    leading: const Icon(Icons.info_outline_rounded, size: 20),
+                    title: const Text('关于'),
+                    subtitle: const Text(
+                        '项目介绍 / 作者 / 相关链接'),
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                          builder: (_) => const AboutPage()),
+                    ),
                   ),
                 ],
               ),
@@ -337,6 +384,32 @@ class SettingsPage extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 选择并保存自定义背景图（应用于除漫画阅读器外的所有页面）。
+  Future<void> _pickBackground(BuildContext context, AppState state) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final file = await openFile(
+        acceptedTypeGroups: <XTypeGroup>[
+          const XTypeGroup(
+            label: '图片',
+            extensions: <String>['png', 'jpg', 'jpeg', 'webp', 'gif'],
+          ),
+        ],
+      );
+      if (file == null) return;
+      // 选择器返回的是临时缓存路径（Android SAF 副本），
+      // 复制进应用文档目录确保持久可用。
+      final docs = await getApplicationDocumentsDirectory();
+      final target = File('${docs.path}/custom_background.img');
+      await target.writeAsBytes(await File(file.path).readAsBytes());
+      await state.setBackground(target.path);
+      messenger.showSnackBar(
+          const SnackBar(content: Text('背景已更新，应用于除阅读器外的所有页面')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('设置背景失败：$e')));
+    }
   }
 
   List<MapEntry<int, String>> _apiOptions() {
