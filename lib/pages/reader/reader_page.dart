@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
@@ -262,7 +261,7 @@ class _ReaderPageState extends State<ReaderPage> {
     }
     final pos = _listCtrl.position;
     final avg = pos.maxScrollExtent > 0
-        ? pos.maxScrollExtent / (_images.length == 0 ? 1 : _images.length)
+        ? pos.maxScrollExtent / (_images.isEmpty ? 1 : _images.length)
         : pos.viewportDimension;
     final target = (i * avg).clamp(0.0, pos.maxScrollExtent);
     _listCtrl.jumpTo(target);
