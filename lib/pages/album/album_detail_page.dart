@@ -23,7 +23,7 @@ import 'album_comment_page.dart';
 /// - 三个页签：漫画介绍 / 目录 / 评论（TabBar 橙色下划线，
 ///   NestedScrollView 滚动时头部折叠、页签吸顶）；
 /// - 介绍页签：喜欢/评论/观看 图标统计 + 收藏/下载/连载通知操作、
-///   禁漫车编号、描述、标签（#前缀 + ? 帮助）、作者、更多相关；
+///   JM 号编号、描述、标签（#前缀 + ? 帮助）、作者、更多相关；
 /// - 多章漫画点下载弹出章节多选（单章漫画直接整本入队）。
 class AlbumDetailPage extends StatefulWidget {
   const AlbumDetailPage({super.key});
@@ -357,16 +357,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
     final a = _album!;
     Clipboard.setData(ClipboardData(text: a.id.toString()));
     ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('已复制编号 JM${a.id}')));
+        .showSnackBar(SnackBar(content: Text('已复制 JM 号：JM${a.id}')));
   }
 
   void _showTagHelp() {
     showDialog<void>(
       context: context,
       builder: (BuildContext c) => AlertDialog(
-        title: const Text('什么是禁漫车？'),
+        title: const Text('什么是 JM 号？'),
         content: const Text(
-          '禁漫车即漫画编号（JM 开头数字），可在搜索框中直接输入编号'
+          'JM 号即漫画编号（JM 开头数字），可在搜索框中直接输入编号'
           '快速定位漫画，也可把编号分享给其他读者。标签搜索支持输入'
           '任一标签快速筛选同类作品。',
         ),
@@ -561,11 +561,17 @@ class _HeaderHero extends StatelessWidget {
       child: Stack(
       fit: StackFit.expand,
       children: <Widget>[
-        // 封面原图铺满（RepaintBoundary 限制重绘范围）
+        // 封面原图：默认只截取封面上半部分（对齐需求"默认截图封面图上半部分"）。
+        // 使用 BoxFit.cover + Alignment.topCenter：长封面图自动裁掉下半部，
+        // 露出顶部封面图标题区域；用户在详情页内可滚动看到完整封面（PageView）。
         RepaintBoundary(
           child: coverUrl.isEmpty
               ? ColoredBox(color: cs.surfaceContainerHighest)
-              : ImageStoreCover(url: coverUrl, fit: BoxFit.cover),
+              : ImageStoreCover(
+                  url: coverUrl,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.topCenter,
+                ),
         ),
         // 渐变遮罩：顶部轻微压暗（悬浮按钮可读）+ 底部重压（标题可读）
         const DecoratedBox(
@@ -776,14 +782,14 @@ class _IntroTab extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                // ---------- 禁漫车 / 编号 ----------
+                // ---------- JM 号 ----------
                 Entrance(
                   delay: const Duration(milliseconds: 40),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        '禁漫车',
+                        'JM 号',
                         style: tt.titleSmall?.copyWith(
                           fontWeight: FontWeight.w800,
                         ),
@@ -1116,48 +1122,182 @@ class _CatalogTab extends StatelessWidget {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
               sliver: SliverList.separated(
-                itemCount: album.series.length,
+                itemCount: _chapterGroupCount(album.series.length),
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (BuildContext c, int i) {
-                  final s = album.series[i];
-                  return Card(
-                    margin: EdgeInsets.zero,
-                    child: ListTile(
+                  final group = _chapterGroupAt(album.series, i);
+                  if (group.length == 1) {
+                    // 单章分组：直接显示为单条章节卡片。
+                    final s = group.first;
+                    return Card(
+                      margin: EdgeInsets.zero,
+                      child: ListTile(
+                        dense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 2,
+                        ),
+                        leading: Container(
+                          width: 34,
+                          height: 34,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: cs.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            s.sort,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: cs.primary,
+                            ),
+                          ),
+                        ),
+                        title: Text(
+                          s.name.isEmpty ? '第${s.sort}话' : s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        trailing: Icon(
+                          Icons.chevron_right_rounded,
+                          color: cs.onSurfaceVariant,
+                        ),
+                        onTap: () => onOpenReader(chapterId: s.id),
+                      ),
+                    );
+                  }
+                  // 多章合并分组（每 10 话合并为 x~x 话卡片）：
+                  // 点击弹出展开列表，从中选一章进入阅读。
+                  return _ChapterGroupCard(
+                    group: group,
+                    onOpenReader: onOpenReader,
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 按每 10 话一组对章节列表分组，返回分组总数。
+/// - 第 1 组：第 1~10 章（≤ 10 章）
+/// - 第 2 组：第 11~20 章
+/// - …
+/// - 最后一组：余下的章节数（可能是 1~10 章）
+int _chapterGroupCount(int total) {
+  if (total <= 0) return 0;
+  return (total + 9) ~/ 10;
+}
+
+/// 取第 [groupIndex] 个分组（0-indexed）内的章节列表。
+List<SeriesItem> _chapterGroupAt(List<SeriesItem> series, int groupIndex) {
+  final start = groupIndex * 10;
+  final end = (start + 10).clamp(0, series.length);
+  if (start >= series.length) return <SeriesItem>[];
+  return series.sublist(start, end);
+}
+
+/// 章节合并卡片：显示「第 x~x 话 · N 章」标题，点击展开为子列表。
+class _ChapterGroupCard extends StatefulWidget {
+  const _ChapterGroupCard({
+    required this.group,
+    required this.onOpenReader,
+  });
+
+  final List<SeriesItem> group;
+
+  final void Function({String chapterId}) onOpenReader;
+
+  @override
+  State<_ChapterGroupCard> createState() => _ChapterGroupCardState();
+}
+
+class _ChapterGroupCardState extends State<_ChapterGroupCard> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final first = widget.group.first;
+    final last = widget.group.last;
+    final label = first.sort == last.sort
+        ? '第${first.sort}话'
+        : '第${first.sort}~${last.sort}话';
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ListTile(
+            dense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 2,
+            ),
+            leading: Container(
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.menu_book_rounded,
+                  size: 18, color: cs.primary),
+            ),
+            title: Text(
+              label,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text('${widget.group.length} 章'),
+            trailing: Icon(
+              _expanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.keyboard_arrow_down_rounded,
+              color: cs.onSurfaceVariant,
+            ),
+            onTap: () => setState(() => _expanded = !_expanded),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: Column(
+                children: <Widget>[
+                  for (final s in widget.group)
+                    ListTile(
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 2,
+                        horizontal: 12,
+                        vertical: 0,
                       ),
-                      leading: Container(
-                        width: 34,
-                        height: 34,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: cs.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          s.sort,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: cs.primary,
-                          ),
+                      leading: Text(
+                        s.sort,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       title: Text(
                         s.name.isEmpty ? '第${s.sort}话' : s.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
                       ),
                       trailing: Icon(
                         Icons.chevron_right_rounded,
+                        size: 20,
                         color: cs.onSurfaceVariant,
                       ),
-                      onTap: () => onOpenReader(chapterId: s.id),
+                      onTap: () =>
+                          widget.onOpenReader(chapterId: s.id),
                     ),
-                  );
-                },
+                ],
               ),
             ),
         ],
@@ -1197,10 +1337,14 @@ class _CommentsTab extends StatelessWidget {
 
 /// 详情页封面（走 ImageStore 统一加载，含 `_3x4` 回退与魔数校验）。
 class ImageStoreCover extends StatefulWidget {
-  const ImageStoreCover({super.key, required this.url, this.fit});
+  const ImageStoreCover({super.key, required this.url, this.fit, this.alignment});
 
   final String url;
   final BoxFit? fit;
+
+  /// 图片对齐方式（默认 Alignment.center）。
+  /// 详情页头部使用 Alignment.topCenter 以截取长封面图的顶部。
+  final Alignment? alignment;
 
   @override
   State<ImageStoreCover> createState() => _ImageStoreCoverState();
@@ -1246,6 +1390,7 @@ class _ImageStoreCoverState extends State<ImageStoreCover> {
         return Image.memory(
           bytes,
           fit: widget.fit ?? BoxFit.cover,
+          alignment: widget.alignment ?? Alignment.center,
           gaplessPlayback: true,
         );
       },

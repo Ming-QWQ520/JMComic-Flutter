@@ -314,6 +314,12 @@ class JmApi {
   /// 用于购买/收藏/签到等操作后同步余额（J币）、等级等展示字段。
   /// 服务端响应形态不稳定（data 直接是用户对象或包一层），统一走
   /// LoginData.fromMapSafe 的宽松解析；失败返回 null 由调用方兜底。
+  ///
+  /// 备注：当前公开 API 体系（参考 JUKOMU/JMComic-Api-Java、
+  /// ccbkkb/jmcomic-api）均不暴露"上传头像"接口，JM 官方 App 改头像
+  /// 走 useredit/{uid} 的图片上传步骤，但该接口未公开文档化、
+  /// 也无 multipart 上传实现，故当前 App 暂不支持修改头像。
+  /// 仍可通过个人资料页编辑文本字段（昵称、个人简介等）。
   Future<LoginData?> getUserProfile() async {
     final r = await _c.get('user_profile', <String, dynamic>{});
     final data = r.data;

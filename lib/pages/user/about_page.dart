@@ -7,8 +7,9 @@ import '../../widgets/feedback.dart';
 
 /// 关于项目页（「更多 → 关于项目」/ 设置 → 关于）。
 ///
-/// 展示：项目名称与介绍、作者信息、相关链接（B站 / GitHub / 抖音）、
-/// 仓库 Star 数（GitHub API，进程冷启动时请求一次，切后台回前台不重复请求）。
+/// 展示：项目名称与介绍（含 APP 图标）、作者信息、相关链接
+/// （B站 / GitHub / 抖音）、仓库 Star 数（GitHub API，进程冷启动时
+/// 请求一次，切后台回前台不重复请求）。
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -61,20 +62,31 @@ class AboutPage extends StatelessWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Container(
-                      width: 52,
-                      height: 52,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: cs.primary,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Text(
-                        'JM',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w900,
-                          fontSize: 18,
+                    // APP 图标（与启动器图标同源，体现项目品牌识别）。
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.asset(
+                        'assets/icon/icon.png',
+                        width: 52,
+                        height: 52,
+                        fit: BoxFit.cover,
+                        gaplessPlayback: true,
+                        errorBuilder: (_, _, _) => Container(
+                          width: 52,
+                          height: 52,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: cs.primary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Text(
+                            'JM',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 18,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -92,7 +104,7 @@ class AboutPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'v2.2.0 · API 协议对齐 tonquer/JMComic-qt',
+                            'v0.1.0 · API 协议对齐 tonquer/JMComic-qt',
                             style: tt.labelSmall?.copyWith(
                               color: cs.onSurfaceVariant,
                             ),
@@ -135,7 +147,8 @@ class AboutPage extends StatelessWidget {
               leading: Icon(Icons.star_rounded,
                   size: 24, color: const Color(0xFFF5B301)),
               title: const Text('GitHub Stars'),
-              subtitle: const Text('每次进入 APP 时请求一次（切后台返回不刷新）'),
+              // 去除原副标题"每次进入 APP 时请求一次（切后台返回不刷新）"
+              // 让 Star 卡片更紧凑、视觉重心集中在数值本身。
               trailing: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
                 child: Text(

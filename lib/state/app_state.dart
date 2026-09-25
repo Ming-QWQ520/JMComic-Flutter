@@ -72,6 +72,10 @@ class AppState extends ChangeNotifier {
   String get backgroundPath => _backgroundPath;
   bool get hasCustomBackground => _backgroundPath.trim().isNotEmpty;
 
+  /// 自定义背景透明度（0.0~1.0，默认 0.5）。
+  double _backgroundOpacity = 0.5;
+  double get backgroundOpacity => _backgroundOpacity;
+
   // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
   int? _repoStars;
   int? get repoStars => _repoStars;
@@ -119,6 +123,11 @@ class AppState extends ChangeNotifier {
       _downloadDir = await _store.getString('download_dir', '');
       DownloadManager.instance.customBasePath = _downloadDir;
       _backgroundPath = await _store.getString('custom_background', '');
+      // 透明度：默认 0.5，向下兼容老用户（未设置时为 0.5）。
+      _backgroundOpacity = await _store.getInt('background_opacity', 50) / 100.0;
+      // 限制范围 [0.0, 1.0]
+      if (_backgroundOpacity < 0) _backgroundOpacity = 0;
+      if (_backgroundOpacity > 1) _backgroundOpacity = 1;
       if (_backgroundPath.isNotEmpty && !File(_backgroundPath).existsSync()) {
         // 背景图文件已被删除/清理：静默回落默认背景。
         _backgroundPath = '';
@@ -280,15 +289,34 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// 设置背景透明度（0.0~1.0）。
+  Future<void> setBackgroundOpacity(double v) async {
+    _backgroundOpacity = v.clamp(0.0, 1.0);
+    notifyListeners();
+    // 持久化为整数百分比（0~100），避免 SharedPreferences 存浮点带来的精度漂移。
+    await _store.setInt('background_opacity', (_backgroundOpacity * 100).round());
+  }
+
   /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。
+  ///
+  /// 同时测速所有候选线路（4 个主线路 + CDN + 代理），
+  /// 测速键使用与 `_apiOptions`/`_imgOptions` 相同的索引
+  /// （1..N 为真实主机，N+1 为 CDN，N+2 为代理）。
   Future<void> testApiSpeed() async {
     if (speedTesting) return;
     speedTesting = true;
     notifyListeners();
     final out = <String, int>{};
-    for (final url in JmDomain.apiUrlList.value) {
-      out[url] = await _c.pingHost(url);
+    // 1) 主线路：直接 ping 主机。
+    final list = JmDomain.apiUrlList.value;
+    for (var i = 0; i < list.length; i++) {
+      final idx = i + 1;
+      out[idx.toString()] = await _c.pingHost(list[i]);
     }
+    // 2) CDN 加速线路（索引 5）。
+    out['5'] = await _c.pingHost(JmDomain.cdnApiUrl.value);
+    // 3) 代理线路（索引 6）。
+    out['6'] = await _c.pingHost(JmDomain.proxyApiUrl.value);
     speedResults = out;
     speedTesting = false;
     notifyListeners();
