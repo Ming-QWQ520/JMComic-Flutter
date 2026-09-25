@@ -46,6 +46,52 @@ bool _b(dynamic v, [bool def = false]) {
 Map<String, dynamic> _m(dynamic v) =>
     v is Map<String, dynamic> ? v : <String, dynamic>{};
 
+/// 剥离服务端返回文本中的 HTML 标签并解码常见实体。
+///
+/// 典型场景：评论 content 形如
+/// `<div style='flex-direction:row:flex-wrap:wrap:'>[我推荐这本书 1475566]</div>`，
+/// 直接展示会把整段 style 代码暴露给用户（旧版样式的 bug）。
+/// 这里移除全部标签仅保留纯文本，并处理 &amp; &lt; &gt; &quot; &#39; &nbsp;。
+String stripHtmlTags(String raw) {
+  if (raw.isEmpty || !raw.contains('<')) {
+    return _decodeHtmlEntities(raw);
+  }
+  // <br> / </p> 等块级标签转换为换行，避免内容粘连。
+  var s = raw.replaceAll(
+    RegExp(r'<\s*br\s*/?\s*>', caseSensitive: false),
+    '\n',
+  );
+  s = s.replaceAll(
+    RegExp(r'</\s*(p|div|li|tr)\s*>', caseSensitive: false),
+    '\n',
+  );
+  s = s.replaceAllMapped(
+    RegExp(r'<[^>]*>'),
+    (_) => '',
+  );
+  s = _decodeHtmlEntities(s);
+  // 压缩多余空行。
+  s = s
+      .split('\n')
+      .map((l) => l.trim())
+      .join('\n')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+  return s;
+}
+
+String _decodeHtmlEntities(String s) {
+  if (!s.contains('&')) return s;
+  return s
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&apos;', "'");
+}
+
 /// 将任意值规范化为 `List<Map<String, dynamic>>`。
 List<Map<String, dynamic>> listOfMaps(dynamic v) {
   if (v is List) {
@@ -97,11 +143,13 @@ class SubCategory {
 /// 分类。
 class Category {
   Category.fromMap(Map<String, dynamic> m)
-      : id = _s(m['id']),
-        name = _s(m['name']),
+      : id = _s(m['id'] ?? m['CID']),
+        name = _s(m['name'] ?? m['Name']),
         slug = _s(m['slug']),
         type = _s(m['type']),
-        totalAlbums = _s(m['total_albums']),
+        // 不同线路字段名不一致：total / total_albums（缺省时为 0，
+        // UI 层会以“点击浏览”兜底而不是误导性地显示“共 0 部作品”）。
+        totalAlbums = _s(m['total'] ?? m['total_albums'], '0'),
         subCategories =
             listOfMaps(m['sub_categories']).map(SubCategory.fromMap).toList();
 
@@ -109,7 +157,17 @@ class Category {
   final String name;
   final String slug;
   final String type;
+
+  /// 作品总数（字符串形态，可能为空 / "0" / null —— 服务端部分分类
+  /// 不下发总数，但内容实际存在）。
   final String totalAlbums;
+
+  /// 是否存在可展示的总数（>0 才展示，避免“共 0 部作品”的误导）。
+  bool get hasTotal {
+    final n = int.tryParse(totalAlbums) ?? 0;
+    return n > 0;
+  }
+
   final List<SubCategory> subCategories;
 }
 
@@ -386,7 +444,9 @@ class CommentInfo {
         level = _i(_m(m['expinfo'])['level']),
         username = _s(m['username']),
         photo = _s(m['photo']),
-        content = _s(m['content']),
+        // 服务端 content 可能携带内联 HTML（如推荐卡片 div），
+        // 剥离标签后仅展示纯文本，避免前端出现原始样式代码。
+        content = stripHtmlTags(_s(m['content'])),
         likes = _i(m['likes']),
         addTime = _s(m['addtime']),
         linkBookName = _s(m['name']),

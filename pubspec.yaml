@@ -1,7 +1,7 @@
 name: jmcomic
 description: "JMComic-Flutter: A comic reader app for learning purposes, based on JMcomic-API."
 publish_to: 'none'
-version: 0.1.0+1
+version: 2.1.0+1
 
 environment:
   sdk: ^3.13.0
@@ -24,8 +24,6 @@ dependencies:
   shared_preferences: ^2.5.3
   # 下载目录（本地下载管理）
   path_provider: ^2.1.4
-  # 封面磁盘缓存
-  cached_network_image: ^3.4.1
 
 dev_dependencies:
   flutter_test:

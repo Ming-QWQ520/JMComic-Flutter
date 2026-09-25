@@ -127,9 +127,7 @@ class _CategoryPageState extends State<CategoryPage>
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  cat.subCategories.isEmpty
-                                      ? '共 ${cat.totalAlbums} 部作品'
-                                      : '${cat.subCategories.length} 个子分类 · 共 ${cat.totalAlbums} 部作品',
+                                  _subTitle(cat),
                                   style: tt.labelSmall?.copyWith(
                                     color: cs.onSurfaceVariant,
                                   ),
@@ -149,6 +147,18 @@ class _CategoryPageState extends State<CategoryPage>
               },
             ),
     );
+  }
+
+  /// 副标题：服务端部分分类不下发总数（total_albums 为空 / 0），
+  /// 但内容实际存在 —— 此时显示引导文案而不是误导性的"共 0 部作品"。
+  String _subTitle(Category cat) {
+    final hasSub = cat.subCategories.isNotEmpty;
+    if (!cat.hasTotal) {
+      return hasSub ? '${cat.subCategories.length} 个子分类 · 点击浏览作品' : '点击浏览作品';
+    }
+    return hasSub
+        ? '${cat.subCategories.length} 个子分类 · 共 ${cat.totalAlbums} 部作品'
+        : '共 ${cat.totalAlbums} 部作品';
   }
 
   IconData _iconFor(Category cat) {

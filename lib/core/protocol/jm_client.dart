@@ -904,7 +904,8 @@ class JmClient {
   /// CDN 被 WAF 拦截时会返回 200 + HTML/JSON 反爬页，此类响应
   /// 若直接交给解码器会静默失败（DecodeException）。在此处拦截，
   /// 视为本次尝试失败并轮换到下一图片线路。
-  static bool _looksLikeImage(List<int> b) {
+  /// 公开供 ImageStore 等复用（磁盘缓存回读时同样校验）。
+  static bool looksLikeImage(List<int> b) {
     if (b.length < 12) return false;
     // JPEG：FF D8 FF
     if (b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return true;
@@ -971,7 +972,7 @@ class JmClient {
         throw JmHttpException(0, '空白图');
       }
       // 魔数校验：拦截 200 状态下的反爬网页/垃圾响应，换线路重试
-      if (!_looksLikeImage(bytes)) {
+      if (!looksLikeImage(bytes)) {
         throw JmHttpException(0, '非图片响应（可能被 CDN 拦截）');
       }
       return bytes;

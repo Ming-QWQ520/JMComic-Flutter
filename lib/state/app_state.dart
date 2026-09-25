@@ -5,6 +5,7 @@ import '../core/protocol/jm_api.dart';
 import '../core/protocol/jm_client.dart';
 import '../core/protocol/jm_domain.dart';
 import '../core/protocol/models.dart';
+import '../services/download_manager.dart';
 import '../services/local_store.dart';
 
 /// 阅读方向。
@@ -59,6 +60,10 @@ class AppState extends ChangeNotifier {
   int _dohIndex = 0;
   int get dohIndex => _dohIndex;
 
+  /// 下载根目录（空 = 使用平台默认，Android 为公共下载目录）。
+  String _downloadDir = '';
+  String get downloadDir => _downloadDir;
+
   /// 线路测速结果 host -> 毫秒（-1 失败）。
   Map<String, int> speedResults = <String, int>{};
   bool speedTesting = false;
@@ -98,6 +103,8 @@ class AppState extends ChangeNotifier {
       _imgIndex = await _store.getInt('img_index', 1);
       _enableDoh = await _store.getBool('enable_doh', false);
       _dohIndex = await _store.getInt('doh_index', 0);
+      _downloadDir = await _store.getString('download_dir', '');
+      DownloadManager.instance.customBasePath = _downloadDir;
 
       final jwt = await _store.getString('jwt');
       final avs = await _store.getString('avs');
@@ -212,6 +219,14 @@ class AppState extends ChangeNotifier {
     _c.clearDns();
     notifyListeners();
     await _store.setInt('doh_index', idx);
+  }
+
+  /// 修改下载根目录（设置页调用，持久化并即时生效）。
+  Future<void> setDownloadDir(String path) async {
+    _downloadDir = path.trim();
+    DownloadManager.instance.customBasePath = _downloadDir;
+    notifyListeners();
+    await _store.setString('download_dir', _downloadDir);
   }
 
   /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。

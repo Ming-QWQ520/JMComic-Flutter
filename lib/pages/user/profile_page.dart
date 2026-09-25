@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
 import '../../state/app_state.dart';
+import '../../widgets/cover_image.dart';
 import '../../widgets/feedback.dart';
 import '../blogs/blogs_page.dart';
 import '../download/download_page.dart';
@@ -35,20 +36,15 @@ class ProfilePage extends StatelessWidget {
               padding: const EdgeInsets.all(18),
               child: Row(
                 children: <Widget>[
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: cs.primary.withValues(alpha: 0.14),
-                    backgroundImage: user != null &&
+                  // 头像统一走 AvatarImage（ImageStore 加载，
+                  // 避免裸 NetworkImage 缺 UA 被拦截产生解码失败日志）。
+                  AvatarImage(
+                    photo: user != null &&
                             !user.photo.startsWith('nopic-') &&
                             user.photo.isNotEmpty
-                        ? NetworkImage(state.api.avatarUrl(user.photo))
-                        : null,
-                    child: user == null ||
-                            user.photo.startsWith('nopic-') ||
-                            user.photo.isEmpty
-                        ? Icon(Icons.person_rounded,
-                            color: cs.primary, size: 30)
-                        : null,
+                        ? user.photo
+                        : '',
+                    radius: 30,
                   ),
                   const SizedBox(width: 14),
                   Expanded(

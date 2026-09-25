@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../core/protocol/jm_api.dart';
 import '../core/protocol/models.dart';
 import '../core/utils/scramble.dart';
+import 'storage_service.dart';
 
 /// 下载任务状态。
 enum DownloadStatus { waiting, running, paused, done, error }
@@ -52,7 +53,11 @@ class DownloadTask extends ChangeNotifier {
 
 /// 本地下载管理器（对齐 tonquer/JMComic-qt 下载体系）。
 ///
-/// - 目录结构：{documents}/commics/{albumId}/{epsId}/{index}.jpg（对齐 qt SavePathDir）；
+/// - 目录结构（默认）：`/storage/emulated/0/Download/JM-Flutter/{漫画号}/{章节ID}/图片`；
+///   无章节漫画（epsId == albumId）图片直接放在 `JM-Flutter/{漫画号}/` 下，
+///   即用户约定的 `download/JM-Flutter/[漫画号]/图片` 形态；
+/// - 下载位置可在设置中修改（持久化）；桌面/测试环境回退应用文档目录；
+/// - 首次使用前自动检查/申请存储权限（详见 [StorageService]）；
 /// - 并发下载数（对齐 qt DownloadThreadNum = 5）；
 /// - 下载后自动乱序还原为可直读图片（对齐 qt SegmentationPictureToDisk）；
 /// - 支持暂停/继续/删除与本地离线阅读。
@@ -68,12 +73,47 @@ class DownloadManager extends ChangeNotifier {
   bool _running = false;
   Directory? _baseDir;
 
+  /// 用户自定义下载根目录（设置页修改，持久化于 LocalStore）。
+  String customBasePath = '';
+
+  /// Android 默认下载位置（公共下载目录下的 JM-Flutter 文件夹）。
+  static const String androidDefaultBase =
+      '/storage/emulated/0/Download/JM-Flutter';
+
+  /// 当前生效的下载根目录路径（解析前也可用于 UI 展示）。
+  String get basePath {
+    if (customBasePath.trim().isNotEmpty) return customBasePath.trim();
+    if (Platform.isAndroid) return androidDefaultBase;
+    return ''; // 非 Android 平台解析时回退应用文档目录
+  }
+
   Future<Directory> baseDir() async {
     if (_baseDir != null) return _baseDir!;
-    final docs = await getApplicationDocumentsDirectory();
-    _baseDir = Directory('${docs.path}/commics');
-    if (!_baseDir!.existsSync()) _baseDir!.createSync(recursive: true);
-    return _baseDir!;
+    String path = basePath;
+    if (path.isEmpty) {
+      final docs = await getApplicationDocumentsDirectory();
+      path = '${docs.path}/JM-Flutter';
+    }
+    final dir = Directory(path);
+    if (!dir.existsSync()) {
+      dir.createSync(recursive: true);
+    }
+    _baseDir = dir;
+    return dir;
+  }
+
+  /// 设置新的下载根目录（设置页调用）。
+  Future<void> setBasePath(String path) async {
+    customBasePath = path.trim();
+    _baseDir = null; // 下次访问重新解析
+    await baseDir();
+  }
+
+  /// 章节目录：无章节漫画（epsId == albumId）图片直接放在
+  /// `{base}/{albumId}/` 下；多章节漫画为 `{base}/{albumId}/{epsId}/`。
+  String epsDirPath(Directory base, String albumId, String epsId) {
+    final sub = (epsId.isEmpty || epsId == albumId) ? albumId : '$albumId/$epsId';
+    return '${base.path}/$sub';
   }
 
   /// 某章节是否已完整下载。
@@ -83,12 +123,20 @@ class DownloadManager extends ChangeNotifier {
     return (meta['done'] as bool? ?? false);
   }
 
-  /// 列出已下载章节元信息。
-  Future<Map<String, dynamic>?> _readMeta(String albumId, String epsId) async {
+  /// 读取本地章节元信息（新目录优先，兼容旧版 documents/commics 布局）。
+  Future<Map<String, dynamic>?> _readMeta(
+    String albumId,
+    String epsId,
+  ) async {
     try {
       final dir = await baseDir();
-      final f = File('${dir.path}/$albumId/$epsId/meta.json');
-      if (!f.existsSync()) return null;
+      var f = File('${epsDirPath(dir, albumId, epsId)}/meta.json');
+      if (!f.existsSync()) {
+        // 旧版布局兼容：{documents}/commics/{albumId}/{epsId}/meta.json
+        final docs = await getApplicationDocumentsDirectory();
+        f = File('${docs.path}/commics/$albumId/$epsId/meta.json');
+        if (!f.existsSync()) return null;
+      }
       return jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
     } catch (_) {
       return null;
@@ -99,14 +147,23 @@ class DownloadManager extends ChangeNotifier {
   Future<List<File>> localImages(String albumId, String epsId) async {
     final meta = await _readMeta(albumId, epsId);
     if (meta == null) return <File>[];
-    final dir = await baseDir();
-    final epsDir = Directory('${dir.path}/$albumId/$epsId');
-    if (!epsDir.existsSync()) return <File>[];
     final n = meta['total'] as int? ?? 0;
+    final base = await baseDir();
+    final dirs = <String>[
+      epsDirPath(base, albumId, epsId),
+      // 旧版布局兼容
+      '${base.path}/commics/$albumId/$epsId',
+    ];
     final out = <File>[];
-    for (var i = 0; i < n; i++) {
-      final f = File('${epsDir.path}/$i.jpg');
-      if (f.existsSync()) out.add(f);
+    for (final path in dirs) {
+      final epsDir = Directory(path);
+      if (!epsDir.existsSync()) continue;
+      out.clear();
+      for (var i = 0; i < n; i++) {
+        final f = File('${epsDir.path}/$i.jpg');
+        if (f.existsSync()) out.add(f);
+      }
+      if (out.isNotEmpty) return out;
     }
     return out;
   }
@@ -130,12 +187,20 @@ class DownloadManager extends ChangeNotifier {
   /// 添加单章下载（对齐 qt download_some_view）。
   ///
   /// 拉取章节图片列表后入队，由调度器按并发数执行。
+  /// 首次使用前确保已具备存储权限（未授权时抛出可提示的异常）。
   Future<void> addEps({
     required String albumId,
     required String albumName,
     required String epsId,
     required String epsName,
   }) async {
+    // 存储权限：公共目录写入前提（Android）。
+    if (!await StorageService.hasStorage()) {
+      final granted = await StorageService.ensureStorage();
+      if (!granted) {
+        throw Exception('未授予存储权限：请在系统设置中允许"所有文件访问"后重试');
+      }
+    }
     // 已下载/已在队列则跳过
     if (await isDownloaded(albumId, epsId)) return;
     if (tasks.any((t) => t.albumId == albumId && t.epsId == epsId)) return;
@@ -189,7 +254,7 @@ class DownloadManager extends ChangeNotifier {
     // 删除本地半成品
     try {
       final dir = await baseDir();
-      final epsDir = Directory('${dir.path}/${task.albumId}/${task.epsId}');
+      final epsDir = Directory(epsDirPath(dir, task.albumId, task.epsId));
       if (epsDir.existsSync()) epsDir.deleteSync(recursive: true);
     } catch (_) {}
     notifyListeners();
@@ -220,7 +285,7 @@ class DownloadManager extends ChangeNotifier {
     task.setStatus(DownloadStatus.running);
     try {
       final dir = await baseDir();
-      final epsDir = Directory('${dir.path}/${task.albumId}/${task.epsId}');
+      final epsDir = Directory(epsDirPath(dir, task.albumId, task.epsId));
       if (!epsDir.existsSync()) epsDir.createSync(recursive: true);
       final aid = int.tryParse(task.albumId) ?? 0;
       final needScramble = Scramble.needScramble(aid, task.scrambleId);

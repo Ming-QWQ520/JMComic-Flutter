@@ -1,16 +1,25 @@
-import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
-import '../../core/protocol/jm_client.dart';
 import '../../core/protocol/models.dart';
 import '../../services/download_manager.dart';
+import '../../services/image_store.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
 import 'album_comment_page.dart';
 
 /// 漫画详情页。
+///
+/// 布局（优化后）：
+/// - 头部：左侧 3:4 封面 + 右侧标题 / 作者 / 分类与编号信息；
+/// - 统计区：浏览 / 喜欢 / 页数三分栏卡片，替代原先挤在一行的
+///   小字图标，信息层级更清晰；
+/// - 操作区：开始阅读主按钮 + 收藏 / 点赞 / 下载三个次级操作
+///   （下载原先只藏在 AppBar，移动到操作区提升可发现性）；
+/// - 简介 / 标签 / 章节 / 系列作品分区保持纵向流式排布。
 class AlbumDetailPage extends StatefulWidget {
   const AlbumDetailPage({super.key});
 
@@ -44,6 +53,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   String get _coverUrl {
     if (_album != null) {
       return _api.coverUrl(_album!.id.toString(), updateAt: _album!.updateAt);
+    }
+    if (_fallback != null) {
+      return JmApi.instance.coverUrl(_fallback!.id,
+          updateAt: _fallback!.updateAt);
     }
     return '';
   }
@@ -210,11 +223,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             onPressed: _album == null ? null : _openComments,
           ),
           IconButton(
-            tooltip: '下载全部章节',
-            icon: const Icon(Icons.download_rounded),
-            onPressed: _album == null ? null : _downloadAll,
-          ),
-          IconButton(
             tooltip: 'J 币购买',
             icon: const Icon(Icons.monetization_on_outlined),
             onPressed: _album == null ? null : _buyWithCoin,
@@ -241,22 +249,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             Hero(
               tag: 'cover-${a.id}',
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(14),
                 child: SizedBox(
-                  width: 118,
-                  height: 157,
+                  width: 122,
+                  height: 163, // 3:4 封面比例
                   child: _coverUrl.isEmpty
                       ? Container(color: cs.surfaceContainerHighest)
-                      : CachedNetworkImage(
-                          imageUrl: _coverUrl,
-                          // 与原生图片下载相同的请求头（UA 等），避免
-                          // CDN/WAF 拦截导致解码失败。
-                          httpHeaders: JmClient.instance.imgHttpHeaders,
-                          fit: BoxFit.cover,
-                          memCacheWidth: 360,
-                          errorWidget: (_, _, _) =>
-                              Container(color: cs.surfaceContainerHighest),
-                        ),
+                      : ImageStoreCover(url: _coverUrl),
                 ),
               ),
             ),
@@ -269,6 +268,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     a.name,
                     style: tt.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
+                      height: 1.3,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -292,29 +292,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: <Widget>[
-                      _Stat(
-                        icon: Icons.visibility_outlined,
-                        label: '浏览',
-                        value: a.totalViews,
-                      ),
-                      const SizedBox(width: 14),
-                      _Stat(
-                        icon: Icons.favorite_rounded,
-                        label: '喜欢',
-                        value: a.totalLikes,
-                      ),
-                      const SizedBox(width: 14),
-                      _Stat(
-                        icon: Icons.auto_stories_outlined,
-                        label: '页数',
-                        value: '${a.totalPhotos}',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 6,
                     runSpacing: 6,
@@ -325,27 +303,42 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                         Pill(label: a.categorySub.title, color: cs.tertiary),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '编号 #${a.id}',
+                    style: tt.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
                 ],
               ),
             ),
           ],
         ),
+        // ---------- 统计区（三分栏卡片） ----------
+        const SizedBox(height: 14),
+        _StatsBar(
+          views: a.totalViews,
+          likes: a.totalLikes,
+          photos: '${a.totalPhotos}',
+        ),
         // ---------- 操作按钮 ----------
-        const SizedBox(height: 18),
+        const SizedBox(height: 14),
         Row(
           children: <Widget>[
             Expanded(
               flex: 3,
               child: FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 13),
                 ),
                 onPressed: () => _openReader(),
                 icon: const Icon(Icons.play_arrow_rounded),
                 label: Text(a.series.isEmpty ? '开始阅读' : '从第一章开始'),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: _RoundAction(
                 icon: a.isFavorite
@@ -356,7 +349,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 onTap: _toggleFavorite,
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: _RoundAction(
                 icon: a.liked
@@ -367,17 +360,30 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 onTap: _toggleLike,
               ),
             ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _RoundAction(
+                icon: Icons.download_rounded,
+                label: '下载',
+                active: false,
+                onTap: _downloadAll,
+              ),
+            ),
           ],
         ),
         // ---------- 简介 ----------
         if (a.description.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           SectionHeader(title: '简介'),
-          Text(a.description, style: tt.bodyMedium?.copyWith(height: 1.65)),
+          // 服务端简介偶见内联 HTML，统一剥离后展示纯文本。
+          Text(
+            stripHtmlTags(a.description),
+            style: tt.bodyMedium?.copyWith(height: 1.65),
+          ),
         ],
         // ---------- 标签 ----------
         if (a.tags.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           SectionHeader(title: '标签'),
           Wrap(
             spacing: 8,
@@ -398,7 +404,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ],
         // ---------- 章节 ----------
         if (a.series.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           SectionHeader(title: '章节 (${a.series.length})'),
           ...a.series.map(
             (SeriesItem s) => Card(
@@ -442,7 +448,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ],
         // ---------- 系列作品 ----------
         if (a.works.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 20),
+          const SizedBox(height: 18),
           SectionHeader(title: '系列作品'),
           ...a.works.map(
             (AlbumWorks w) => Card(
@@ -477,9 +483,125 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 }
 
-/// 统计小项。
-class _Stat extends StatelessWidget {
-  const _Stat({required this.icon, required this.label, required this.value});
+/// 详情页封面（走 ImageStore 统一加载，含 `_3x4` 回退与魔数校验）。
+class ImageStoreCover extends StatefulWidget {
+  const ImageStoreCover({super.key, required this.url});
+
+  final String url;
+
+  @override
+  State<ImageStoreCover> createState() => _ImageStoreCoverState();
+}
+
+class _ImageStoreCoverState extends State<ImageStoreCover> {
+  late Future<Uint8List?> _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _future = ImageStore.instance.load(widget.url);
+  }
+
+  @override
+  void didUpdateWidget(ImageStoreCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.url != widget.url) {
+      _future = ImageStore.instance.load(widget.url);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return FutureBuilder<Uint8List?>(
+      future: _future,
+      builder: (BuildContext c, AsyncSnapshot<Uint8List?> snap) {
+        final bytes = snap.data;
+        if (bytes == null || bytes.isEmpty) {
+          return Container(
+            color: cs.surfaceContainerHighest,
+            alignment: Alignment.center,
+            child: snap.connectionState == ConnectionState.waiting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.broken_image_outlined, color: cs.outline),
+          );
+        }
+        return Image.memory(
+          bytes,
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        );
+      },
+    );
+  }
+}
+
+/// 统计条：浏览 / 喜欢 / 页数三分栏。
+class _StatsBar extends StatelessWidget {
+  const _StatsBar({
+    required this.views,
+    required this.likes,
+    required this.photos,
+  });
+
+  final String views;
+  final String likes;
+  final String photos;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: cs.outlineVariant.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: _StatCell(
+              icon: Icons.visibility_outlined,
+              label: '浏览',
+              value: views,
+            ),
+          ),
+          Container(width: 1, height: 26, color: cs.outlineVariant),
+          Expanded(
+            child: _StatCell(
+              icon: Icons.favorite_rounded,
+              label: '喜欢',
+              value: likes,
+            ),
+          ),
+          Container(width: 1, height: 26, color: cs.outlineVariant),
+          Expanded(
+            child: _StatCell(
+              icon: Icons.auto_stories_outlined,
+              label: '页数',
+              value: photos,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 单个统计格。
+class _StatCell extends StatelessWidget {
+  const _StatCell({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -489,13 +611,18 @@ class _Stat extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    return Row(
+    return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: cs.primary),
-        const SizedBox(width: 4),
+        Icon(icon, size: 17, color: cs.primary),
+        const SizedBox(height: 4),
         Text(
-          '$label $value',
+          value,
+          style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 1),
+        Text(
+          label,
           style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
         ),
       ],

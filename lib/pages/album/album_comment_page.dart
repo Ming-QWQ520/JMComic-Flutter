@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
 import '../../state/app_state.dart';
+import '../../widgets/cover_image.dart';
 import '../../widgets/feedback.dart';
 
 /// 评论页（对齐 qt CommentView / SubCommentView）。
@@ -157,7 +158,6 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
                               }
                               return _CommentCard(
                                 comment: _comments[i],
-                                api: _api,
                                 onReply: () =>
                                     setState(() => _replyTo = _comments[i]),
                               );
@@ -238,12 +238,10 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
 class _CommentCard extends StatefulWidget {
   const _CommentCard({
     required this.comment,
-    required this.api,
     required this.onReply,
   });
 
   final CommentInfo comment;
-  final JmApi api;
   final VoidCallback onReply;
 
   @override
@@ -266,17 +264,7 @@ class _CommentCardState extends State<_CommentCard> {
           children: <Widget>[
             Row(
               children: <Widget>[
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: cs.primary.withValues(alpha: 0.12),
-                  backgroundImage: c.headPath.isEmpty
-                      ? null
-                      : NetworkImage(widget.api.avatarUrl(c.headPath)),
-                  child: c.headPath.isEmpty
-                      ? Icon(Icons.person_rounded,
-                          size: 18, color: cs.primary)
-                      : null,
-                ),
+                AvatarImage(photo: c.photo, radius: 16),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -352,19 +340,7 @@ class _CommentCardState extends State<_CommentCard> {
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: <Widget>[
-                                CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor:
-                                      cs.primary.withValues(alpha: 0.1),
-                                  backgroundImage: sub.headPath.isEmpty
-                                      ? null
-                                      : NetworkImage(
-                                          widget.api.avatarUrl(sub.headPath)),
-                                  child: sub.headPath.isEmpty
-                                      ? Icon(Icons.person_rounded,
-                                          size: 14, color: cs.primary)
-                                      : null,
-                                ),
+                                AvatarImage(photo: sub.photo, radius: 12),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Column(

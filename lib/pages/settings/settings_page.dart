@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../core/constants.dart';
 import '../../core/protocol/jm_domain.dart';
 import '../../services/download_manager.dart';
+import '../../services/image_store.dart';
+import '../../services/storage_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
 
@@ -250,6 +252,52 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
+          // ---------- 下载 ----------
+          SectionHeader(title: '下载设置'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.folder_open_rounded,
+                        size: 20, color: cs.primary),
+                    title: const Text('下载位置'),
+                    subtitle: Text(
+                      state.downloadDir.isEmpty
+                          ? (DownloadManager.androidDefaultBase)
+                          : state.downloadDir,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: const Icon(Icons.edit_outlined, size: 18),
+                    onTap: () => _editDownloadDir(context, state),
+                  ),
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.folder_special_rounded,
+                        size: 20, color: cs.primary),
+                    title: const Text('打开下载文件夹'),
+                    subtitle: const Text('调用系统文件管理器浏览已下载内容'),
+                    onTap: () => _openDownloadFolder(context),
+                  ),
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.sd_storage_rounded,
+                        size: 20, color: cs.primary),
+                    title: const Text('存储权限'),
+                    subtitle: const Text('下载到公共目录需要"所有文件访问"权限'),
+                    trailing: TextButton(
+                      onPressed: () => _ensureStorage(context),
+                      child: const Text('检查/授予'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
           // ---------- 其他 ----------
           SectionHeader(title: '其他'),
           Card(
@@ -257,6 +305,14 @@ class SettingsPage extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: <Widget>[
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.image_outlined,
+                        size: 20, color: cs.primary),
+                    title: const Text('清理图片缓存'),
+                    subtitle: const Text('封面/头像的内存与磁盘缓存'),
+                    onTap: () => _clearImageCache(context),
+                  ),
                   ListTile(
                     dense: true,
                     leading: Icon(Icons.cleaning_services_rounded,
@@ -270,7 +326,7 @@ class SettingsPage extends StatelessWidget {
                     leading: Icon(Icons.info_outline_rounded, size: 20),
                     title: Text('关于'),
                     subtitle: Text(
-                        'JMComic-Flutter v2.0.0\nAPI 协议对齐 tonquer/JMComic-qt'),
+                        'JMComic-Flutter v2.1.0\nAPI 协议对齐 tonquer/JMComic-qt'),
                     isThreeLine: true,
                   ),
                 ],
@@ -313,6 +369,112 @@ class SettingsPage extends StatelessWidget {
           shape: BoxShape.circle,
         ),
       );
+
+  /// 修改下载根目录（对齐需求：默认 /storage/emulated/0/Download/JM-Flutter，
+  /// 可在设置中修改；留空恢复默认）。
+  Future<void> _editDownloadDir(BuildContext context, AppState state) async {
+    final ctrl = TextEditingController(
+      text: state.downloadDir.isEmpty
+          ? DownloadManager.androidDefaultBase
+          : state.downloadDir,
+    );
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext c) => AlertDialog(
+        title: const Text('下载位置'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text('下载内容将保存到该目录下的 [漫画号] 子文件夹中。'),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                labelText: '目录路径',
+                hintText: '/storage/emulated/0/Download/JM-Flutter',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              ctrl.clear();
+            },
+            child: const Text('恢复默认'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    if (saved != true) return;
+    // 恢复默认 = 文本框被清空。
+    final path = ctrl.text.trim();
+    await state.setDownloadDir(path);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(path.isEmpty
+          ? '已恢复默认下载位置'
+          : '下载位置已保存：$path'),
+    ));
+  }
+
+  /// 打开下载文件夹（系统文件管理器）。
+  Future<void> _openDownloadFolder(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final dir = await DownloadManager.instance.baseDir();
+      if (!await StorageService.hasStorage()) {
+        await StorageService.ensureStorage();
+      }
+      final ok = await StorageService.openFolder(dir.path);
+      if (!ok) {
+        messenger.showSnackBar(SnackBar(
+          content: Text('未找到可用的文件管理器，请手动前往：${dir.path}'),
+          duration: const Duration(seconds: 4),
+        ));
+      }
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('打开文件夹失败：$e')));
+    }
+  }
+
+  /// 检查/申请存储权限（Android 11+ 跳转系统设置页）。
+  Future<void> _ensureStorage(BuildContext context) async {
+    if (!StorageService.isAndroid) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('当前平台无需存储权限')));
+      return;
+    }
+    final granted = await StorageService.ensureStorage();
+    if (!context.mounted) return;
+    if (granted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('存储权限已授予')));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('已在系统设置中打开授权页，请允许"所有文件访问"后返回'),
+        duration: Duration(seconds: 4),
+      ));
+    }
+  }
+
+  Future<void> _clearImageCache(BuildContext context) async {
+    await ImageStore.instance.clear();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('图片缓存已清理')));
+  }
 
   Future<void> _clearDownloads(BuildContext context) async {
     final ok = await showDialog<bool>(

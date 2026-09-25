@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/protocol/jm_api.dart';
+import '../../core/protocol/models.dart';
 import '../../widgets/feedback.dart';
 
 /// 深夜食堂页（对齐 qt GetBlogsReq2 / GetBlogInfoReq2 / GetBlogForumReq2）。
@@ -290,11 +291,13 @@ class _BlogDetailPageState extends State<_BlogDetailPage> {
         : <String, dynamic>{};
     final title =
         (m['title'] ?? m['name'] ?? '详情').toString();
-    final content = (m['content'] ??
+    final rawContent = (m['content'] ??
             m['description'] ??
             m['blog_content'] ??
             '')
         .toString();
+    // 服务端博客内容为 HTML，剥离标签后展示纯文本。
+    final content = stripHtmlTags(rawContent);
 
     return Scaffold(
       appBar: AppBar(title: Text(title, maxLines: 1)),
