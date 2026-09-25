@@ -1,4 +1,4 @@
-name: CI (Windows x64)
+name: Windows Build (Windows x64)
 
 # Windows 桌面版构建（自 build.yml 拆分，可独立手动触发）。
 #
