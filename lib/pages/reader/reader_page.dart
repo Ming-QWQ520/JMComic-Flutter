@@ -761,12 +761,13 @@ class _ReaderPageState extends State<ReaderPage> {
   }
 
   /// 顶部弹窗：左侧漫画名称，右上角返回按键。
+  ///
+  /// 注意：本方法被 Stack 中 `Positioned(top/left/right)` 包裹
+  /// （外层已带定位），这里绝不能再包一层 Positioned，否则
+  /// Positioned 挂到 IgnorePointer 下会抛
+  /// `ParentData is not a subtype of StackParentData`（log.txt 实锤）。
   Widget _buildTopOverlay() {
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
+    return SafeArea(
         bottom: false,
         child: GestureDetector(
           // 吸收弹窗区域的点击，不透传到内容层
@@ -810,21 +811,17 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           ),
         ),
-      ),
     );
   }
 
   /// 底部弹窗：进度条位于弹窗上方；弹窗内提供设置与深色/浅色切换。
   /// 弹窗只覆盖底部一条区域，其余页面区域仍可正常滚动/翻页。
+  /// （同 _buildTopOverlay：外层 Stack 已有 Positioned，禁止再包一层。）
   Widget _buildBottomOverlay() {
     final app = context.watch<AppState>();
     final isDark = app.scheme.isDark;
     final maxPage = (_images.length - 1).clamp(0, 1 << 30).toDouble();
-    return Positioned(
-      bottom: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
+    return SafeArea(
         top: false,
         child: GestureDetector(
           // 吸收弹窗区域的点击，不透传到内容层
@@ -932,7 +929,6 @@ class _ReaderPageState extends State<ReaderPage> {
             ),
           ),
         ),
-      ),
     );
   }
 }

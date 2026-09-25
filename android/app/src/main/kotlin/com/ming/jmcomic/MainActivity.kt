@@ -27,8 +27,12 @@ import java.io.File
  *   - Android 10 及以下：运行时申请 WRITE/READ_EXTERNAL_STORAGE；
  *   - Android 11+：跳转"所有文件访问"（MANAGE_EXTERNAL_STORAGE）系统设置页。
  * - 打开文件夹：点击"打开下载文件夹"时调用系统文件管理器
- *   （依次尝试 resource/directory 与 vnd.android.document/directory 意图，
- *   全部失败时退回系统"下载"管理器）。
+ *   （主意图为 SAF content:// 目录 URI + file:// 各 MIME 变体作为
+ *   备选意图，一并交给系统选择器——系统"文件管理"与 MT 管理器等
+ *   第三方文件管理器都会出现在打开方式中；全部失败时退回系统
+ *   "下载"管理器）。
+ * - openUrl：调起系统浏览器打开外部链接（B站/GitHub/抖音等）。
+ * - shareText：调起系统分享面板（详情页分享按钮）。
  */
 class MainActivity : FlutterActivity() {
 
@@ -77,6 +81,15 @@ class MainActivity : FlutterActivity() {
                     "openFolder" -> {
                         val path = call.argument<String>("path") ?: ""
                         result.success(openFolder(path))
+                    }
+                    "openUrl" -> {
+                        val url = call.argument<String>("url") ?: ""
+                        result.success(openUrl(url))
+                    }
+                    "shareText" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        val title = call.argument<String>("title") ?: "分享"
+                        result.success(shareText(text, title))
                     }
                     else -> result.notImplemented()
                 }
@@ -142,9 +155,9 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 文件夹无法走 FileProvider（其只支持文件），直接以 file:// URI
-        // 交给文件管理器。Android 7+ 默认 StrictMode 会拦截 file://
-        // 跨进程暴露，这里替换为空策略以放行（仅影响本应用进程）。
+        // 文件夹无法走 FileProvider（其只支持文件），file:// 直交文件管理器。
+        // Android 7+ 默认 StrictMode 会拦截 file:// 跨进程暴露，这里替换
+        // 为空策略以放行（仅影响本应用进程）。
         try {
             StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
         } catch (_: Exception) {
@@ -152,37 +165,77 @@ class MainActivity : FlutterActivity() {
 
         val flags = Intent.FLAG_ACTIVITY_NEW_TASK or
             Intent.FLAG_GRANT_READ_URI_PERMISSION
-        val uri = Uri.fromFile(dir)
+        val fileUri = Uri.fromFile(dir)
 
-        // 主意图 + 备选意图统一交给系统选择器（createChooser）：
-        // 不同文件管理器注册的 MIME 各不相同（resource/directory /
-        // vnd.android.document/directory），单发一个意图只能命中
-        // 个别应用（如网易云/夸克），选择器则列出全部可用项由用户挑选。
-        val primary = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "resource/directory")
-            addFlags(flags)
+        // 主意图：SAF content:// 目录 URI。系统"文件管理 / Files / 显示文件"
+        // 以及支持 content 目录的应用都能直接定位到该文件夹。
+        // 此前主意图是 file:// + resource/directory，多数 ROM 的系统
+        // 文件管理器不响应，选择器里只剩极少数应用（用户反馈
+        // "未包含显示文件/MT管理器打开"），这是根因。
+        val primary: Intent? = try {
+            toSafInitialUri(path)?.let { docId ->
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(
+                        android.provider.DocumentsContract
+                            .buildDocumentUri(
+                                "com.android.externalstorage.documents",
+                                docId
+                            ),
+                        android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                    )
+                    addFlags(flags)
+                }
+            }
+        } catch (_: Exception) {
+            null
         }
+
+        // 备选意图：file:// 各 MIME 变体。MT 管理器等第三方文件管理器
+        // 注册的是 file:// + resource/directory（/ resource/folder /
+        // vnd.android.document/directory），放进 EXTRA_INITIAL_INTENTS
+        // 会与主意图的处理程序一并出现在系统选择器中。
         val extras = listOf(
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "vnd.android.document/directory")
+                setDataAndType(fileUri, "resource/directory")
                 addFlags(flags)
             },
             Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "resource/folder")
+                setDataAndType(fileUri, "resource/folder")
+                addFlags(flags)
+            },
+            Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(fileUri, "vnd.android.document/directory")
                 addFlags(flags)
             }
         )
-        val chooser = Intent.createChooser(primary, "选择打开方式").apply {
+
+        if (primary != null) {
+            val chooser = Intent.createChooser(primary, "打开文件夹").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
+            }
+            try {
+                startActivity(chooser)
+                return true
+            } catch (_: Exception) {
+            }
+        }
+
+        // 兜底 1：仅 file:// 意图交给选择器（SAF URI 构建失败时）。
+        val fileChooser = Intent.createChooser(extras[0], "打开文件夹").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
+            putExtra(
+                Intent.EXTRA_INITIAL_INTENTS,
+                extras.drop(1).toTypedArray()
+            )
         }
         try {
-            startActivity(chooser)
+            startActivity(fileChooser)
             return true
         } catch (_: Exception) {
         }
 
-        // 兜底 1：SAF 目录选择器，直接定位到下载目录
+        // 兜底 2：SAF 目录选择器，直接定位到下载目录
         //（Android 8+ 支持 EXTRA_INITIAL_URI 初始位置提示）。
         try {
             val saf = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -205,12 +258,44 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 兜底 2：打开系统"下载"管理器
+        // 兜底 3：打开系统"下载"管理器
         return try {
             startActivity(
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 打开链接（系统浏览器）
+    // ------------------------------------------------------------------
+
+    private fun openUrl(url: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 系统分享面板
+    // ------------------------------------------------------------------
+
+    private fun shareText(text: String, title: String): Boolean {
+        return try {
+            val intent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            startActivity(Intent.createChooser(intent, title))
             true
         } catch (_: Exception) {
             false

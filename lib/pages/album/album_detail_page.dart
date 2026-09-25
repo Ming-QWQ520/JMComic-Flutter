@@ -1,26 +1,30 @@
-import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
+import '../../core/utils/format.dart';
 import '../../services/download_manager.dart';
 import '../../services/image_store.dart';
+import '../../services/storage_service.dart';
 import '../../state/app_state.dart';
+import '../../widgets/entrance.dart';
 import '../../widgets/feedback.dart';
 import 'album_comment_page.dart';
 
-/// 漫画详情页。
+/// 漫画详情页（JM 官方 App 风格，对齐需求截图）。
 ///
-/// 布局（优化后）：
-/// - 头部：左侧 3:4 封面 + 右侧标题 / 作者 / 分类与编号信息；
-/// - 统计区：浏览 / 喜欢 / 页数三分栏卡片，替代原先挤在一行的
-///   小字图标，信息层级更清晰；
-/// - 操作区：开始阅读主按钮 + 收藏 / 点赞 / 下载三个次级操作
-///   （下载原先只藏在 AppBar，移动到操作区提升可发现性）；
-/// - 简介 / 标签 / 章节 / 系列作品分区保持纵向流式排布。
+/// 布局：
+/// - 全幅封面头部：封面铺满 + 顶部返回/购买/分享悬浮按钮 +
+///   底部渐变遮罩上叠加标题（白）与作者（主题色）；
+/// - 通栏橙色「开始阅读」按钮；
+/// - 三个页签：漫画介绍 / 目录 / 评论（TabBar 橙色下划线，
+///   NestedScrollView 滚动时头部折叠、页签吸顶）；
+/// - 介绍页签：喜欢/评论/观看 图标统计 + 收藏/下载/连载通知操作、
+///   禁漫车编号、描述、标签（#前缀 + ? 帮助）、作者、更多相关；
+/// - 多章漫画点下载弹出章节多选（单章漫画直接整本入队）。
 class AlbumDetailPage extends StatefulWidget {
   const AlbumDetailPage({super.key});
 
@@ -28,13 +32,27 @@ class AlbumDetailPage extends StatefulWidget {
   State<AlbumDetailPage> createState() => _AlbumDetailPageState();
 }
 
-class _AlbumDetailPageState extends State<AlbumDetailPage> {
+class _AlbumDetailPageState extends State<AlbumDetailPage>
+    with TickerProviderStateMixin {
   final JmApi _api = JmApi.instance;
   Album? _album;
   bool _loading = true;
   String _error = '';
   String _id = '';
   SearchAlbum? _fallback;
+  late final TabController _tabCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabCtrl = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   void didChangeDependencies() {
@@ -133,13 +151,23 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
   }
 
-  /// 下载整本（对齐 qt download_all_view）。
-  Future<void> _downloadAll() async {
+  /// 下载入口：单章漫画直接整本入队；多章漫画弹出章节多选。
+  Future<void> _startDownload() async {
     final a = _album;
     if (a == null) return;
+    if (a.series.isEmpty) {
+      await _addChapters(<SeriesItem>[]);
+      return;
+    }
+    await _showChapterPicker(a);
+  }
+
+  /// 入队指定章节（空列表 = 无章节漫画整本）。
+  Future<void> _addChapters(List<SeriesItem> chapters) async {
+    final a = _album!;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      if (a.series.isEmpty) {
+      if (chapters.isEmpty) {
         await DownloadManager.instance.addEps(
           albumId: a.id.toString(),
           albumName: a.name,
@@ -147,16 +175,134 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           epsName: a.name,
         );
       } else {
-        await DownloadManager.instance.addAlbum(
-          albumId: a.id.toString(),
-          albumName: a.name,
-          series: a.series,
-        );
+        for (final eps in chapters) {
+          await DownloadManager.instance.addEps(
+            albumId: a.id.toString(),
+            albumName: a.name,
+            epsId: eps.id,
+            epsName: eps.name.isEmpty ? '第${eps.sort}话' : eps.name,
+          );
+        }
       }
       messenger.showSnackBar(const SnackBar(content: Text('已加入下载队列')));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('加入下载失败: $e')));
     }
+  }
+
+  /// 多章漫画下载：底部弹层章节多选（默认全选，可全选/全不选）。
+  ///
+  /// 此前「下载」对多章漫画不做区分、直接把全部章节加入队列；
+  /// 现按需求先选择要下载的章节再入队。
+  Future<void> _showChapterPicker(Album a) async {
+    final selected = <String>{for (final s in a.series) s.id};
+    final confirmed = await showModalBottomSheet<List<SeriesItem>>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (BuildContext sheetCtx) =>
+          StatefulBuilder(builder: (BuildContext c, void Function(VoidCallback) setSheet) {
+        void toggleAll() {
+          setSheet(() {
+            if (selected.length == a.series.length) {
+              selected.clear();
+            } else {
+              selected
+                ..clear()
+                ..addAll(a.series.map((s) => s.id));
+            }
+          });
+        }
+
+        void commit() {
+          final picked = a.series.where((s) => selected.contains(s.id)).toList();
+          Navigator.pop(sheetCtx, picked);
+        }
+
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetCtx).height * 0.72,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          '选择要下载的章节（${a.series.length} 章）',
+                          style: Theme.of(sheetCtx)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => setSheet(toggleAll),
+                        child: Text(
+                          selected.length == a.series.length ? '全不选' : '全选',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: a.series.length,
+                    itemBuilder: (_, i) {
+                      final s = a.series[i];
+                      return CheckboxListTile(
+                        value: selected.contains(s.id),
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text(
+                          s.name.isEmpty ? '第${s.sort}话' : s.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Text('第 ${s.sort} 章'),
+                        onChanged: (bool? v) => setSheet(() {
+                          v == true
+                              ? selected.add(s.id)
+                              : selected.remove(s.id);
+                        }),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () => Navigator.pop(sheetCtx),
+                          child: const Text('取消'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: selected.isEmpty ? null : commit,
+                          child: Text('下载所选（${selected.length}）'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }),
+    );
+    if (confirmed == null || confirmed.isEmpty) return;
+    await _addChapters(confirmed);
   }
 
   void _needLogin() {
@@ -177,14 +323,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
-  void _openComments() {
+  void _share() {
     final a = _album!;
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            AlbumCommentPage(albumId: a.id.toString(), albumName: a.name),
-      ),
+    StorageService.shareText(
+      '「${a.name}」 https://18comic.vip/album/${a.id}',
+      title: '分享漫画',
     );
   }
 
@@ -210,153 +353,775 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
   }
 
+  void _copyAlbumId() {
+    final a = _album!;
+    Clipboard.setData(ClipboardData(text: a.id.toString()));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('已复制编号 JM${a.id}')));
+  }
+
+  void _showTagHelp() {
+    showDialog<void>(
+      context: context,
+      builder: (BuildContext c) => AlertDialog(
+        title: const Text('什么是禁漫车？'),
+        content: const Text(
+          '禁漫车即漫画编号（JM 开头数字），可在搜索框中直接输入编号'
+          '快速定位漫画，也可把编号分享给其他读者。标签搜索支持输入'
+          '任一标签快速筛选同类作品。',
+        ),
+        actions: <Widget>[
+          FilledButton(
+            onPressed: () => Navigator.pop(c),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: _loading
+          ? const LoadingView()
+          : _error.isNotEmpty
+              ? ErrorView(message: _error, onRetry: _load)
+              : _buildBody(context),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    final a = _album!;
+    final cs = Theme.of(context).colorScheme;
+    return NestedScrollView(
+      headerSliverBuilder: (BuildContext c, bool innerBoxScrolled) => <Widget>[
+        // 头部：全幅封面 + 悬浮按钮 + 标题/作者 + 通栏开始阅读按钮
+        SliverToBoxAdapter(
+          child: Column(
+            children: <Widget>[
+              _HeaderHero(
+                coverUrl: _coverUrl,
+                title: a.name,
+                author: a.authorText,
+                albumId: a.id,
+                height: _headerHeight(context),
+                onBack: () => Navigator.maybePop(context),
+                onShare: _share,
+                onBuy: _buyWithCoin,
+              ),
+              // 通栏橙色「开始阅读」（对齐截图：全宽无圆角）
+              Material(
+                color: cs.primary,
+                child: InkWell(
+                  onTap: () => _openReader(
+                    chapterId: a.series.isEmpty ? '' : a.series.first.id,
+                  ),
+                  child: Container(
+                    height: 48,
+                    alignment: Alignment.center,
+                    child: Text(
+                      a.series.isEmpty ? '开始阅读' : '开始阅读（第1话）',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 页签吸顶（对齐截图：漫画介绍 / 目录 / 评论）。
+        // SliverOverlapAbsorber 必须包住 pinned 页签栏，
+        // 内层 SliverOverlapInjector 才能注入等高内边距。
+        SliverOverlapAbsorber(
+          handle: NestedScrollView.sliverOverlapAbsorberHandleFor(c),
+          sliver: SliverPersistentHeader(
+            pinned: true,
+            delegate: _TabBarDelegate(_tabCtrl),
+          ),
+        ),
+      ],
+      body: Builder(
+        builder: (BuildContext inner) {
+          final handle =
+              NestedScrollView.sliverOverlapAbsorberHandleFor(inner);
+          return TabBarView(
+            controller: _tabCtrl,
+            children: <Widget>[
+              _IntroTab(
+                handle: handle,
+                album: a,
+                onToggleLike: _toggleLike,
+                onToggleFavorite: _toggleFavorite,
+                onDownload: _startDownload,
+                onOpenComments: () => _tabCtrl.animateTo(2),
+                onCopyId: _copyAlbumId,
+                onTagHelp: _showTagHelp,
+                onOpenWork: (String id) => Navigator.pushReplacementNamed(
+                    context, '/album',
+                    arguments: id),
+              ),
+              _CatalogTab(
+                handle: handle,
+                album: a,
+                onOpenReader: _openReader,
+              ),
+              _CommentsTab(
+                handle: handle,
+                album: a,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// 头部高度：随屏宽自适应（比例对齐截图，约 0.95 宽高比）。
+  double _headerHeight(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    return (w * 0.95).clamp(340.0, 520.0);
+  }
+}
+
+/// 吸顶页签栏（含状态栏高度补偿，深色底白字 + 主题色下划线）。
+class _TabBarDelegate extends SliverPersistentHeaderDelegate {
+  _TabBarDelegate(this.controller);
+
+  final TabController controller;
+
+  @override
+  double get minExtent => 48;
+
+  @override
+  double get maxExtent => 48;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlaps) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      color: cs.surface,
+      child: TabBar(
+        controller: controller,
+        indicatorColor: cs.primary,
+        indicatorWeight: 3,
+        indicatorSize: TabBarIndicatorSize.tab,
+        labelColor: cs.onSurface,
+        unselectedLabelColor: cs.onSurfaceVariant,
+        labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+        dividerColor: Colors.transparent,
+        tabs: const <Widget>[
+          Tab(text: '漫画介绍', height: 48),
+          Tab(text: '目录', height: 48),
+          Tab(text: '评论', height: 48),
+        ],
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(_TabBarDelegate oldDelegate) => false;
+}
+
+// ---------------------------------------------------------------------
+// 头部：全幅封面 + 悬浮按钮 + 渐变遮罩上的标题/作者
+// ---------------------------------------------------------------------
+
+class _HeaderHero extends StatelessWidget {
+  const _HeaderHero({
+    required this.coverUrl,
+    required this.title,
+    required this.author,
+    required this.albumId,
+    required this.height,
+    required this.onBack,
+    required this.onShare,
+    required this.onBuy,
+  });
+
+  final String coverUrl;
+  final String title;
+  final String author;
+  final int albumId;
+  final double height;
+  final VoidCallback onBack;
+  final VoidCallback onShare;
+  final VoidCallback onBuy;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: height,
+      child: Stack(
+      fit: StackFit.expand,
+      children: <Widget>[
+        // 封面原图铺满（RepaintBoundary 限制重绘范围）
+        RepaintBoundary(
+          child: coverUrl.isEmpty
+              ? ColoredBox(color: cs.surfaceContainerHighest)
+              : ImageStoreCover(url: coverUrl, fit: BoxFit.cover),
+        ),
+        // 渐变遮罩：顶部轻微压暗（悬浮按钮可读）+ 底部重压（标题可读）
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: <double>[0.0, 0.35, 0.62, 1.0],
+              colors: <Color>[
+                Color(0x66000000),
+                Colors.transparent,
+                Color(0x59000000),
+                Color(0xF2000000),
+              ],
+            ),
+          ),
+        ),
+        // 悬浮按钮：返回 / J币购买 / 分享
+        SafeArea(
+          bottom: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(6, 2, 6, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: <Widget>[
+                _CircleButton(icon: Icons.arrow_back_rounded, onTap: onBack),
+                Row(
+                  children: <Widget>[
+                    _CircleButton(
+                        icon: Icons.monetization_on_outlined, onTap: onBuy),
+                    const SizedBox(width: 8),
+                    _CircleButton(
+                        icon: Icons.share_outlined, onTap: onShare),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        // 底部信息：标题 + 作者（对齐截图：白色标题、主题色作者）
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 12,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                title,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  height: 1.35,
+                  fontWeight: FontWeight.w700,
+                  shadows: <Shadow>[
+                    Shadow(blurRadius: 8, color: Colors.black87),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                author,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: cs.primary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  shadows: const <Shadow>[
+                    Shadow(blurRadius: 6, color: Colors.black87),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+      ),
+    );
+  }
+}
+
+/// 头部半透明圆形按钮。
+class _CircleButton extends StatelessWidget {
+  const _CircleButton({required this.icon, required this.onTap});
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black26,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(8),
+          child: Icon(icon, color: Colors.white, size: 22),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------
+// 介绍页签
+// ---------------------------------------------------------------------
+
+class _IntroTab extends StatelessWidget {
+  const _IntroTab({
+    required this.handle,
+    required this.album,
+    required this.onToggleLike,
+    required this.onToggleFavorite,
+    required this.onDownload,
+    required this.onOpenComments,
+    required this.onCopyId,
+    required this.onTagHelp,
+    required this.onOpenWork,
+  });
+
+  final SliverOverlapAbsorberHandle handle;
+  final Album album;
+  final VoidCallback onToggleLike;
+  final VoidCallback onToggleFavorite;
+  final VoidCallback onDownload;
+  final VoidCallback onOpenComments;
+  final VoidCallback onCopyId;
+  final VoidCallback onTagHelp;
+  final void Function(String id) onOpenWork;
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          _album?.name ?? _fallback?.name ?? '详情',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: <Widget>[
-          IconButton(
-            tooltip: '评论',
-            icon: const Icon(Icons.comment_outlined),
-            onPressed: _album == null ? null : _openComments,
-          ),
-          IconButton(
-            tooltip: 'J 币购买',
-            icon: const Icon(Icons.monetization_on_outlined),
-            onPressed: _album == null ? null : _buyWithCoin,
-          ),
-        ],
-      ),
-      body: _loading
-          ? const LoadingView()
-          : _error.isNotEmpty
-          ? ErrorView(message: _error, onRetry: _load)
-          : _buildBody(context, cs, tt),
-    );
-  }
+    final authors = album.authorText
+        .split(RegExp(r'[,，、]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty && e != '佚名')
+        .toList();
 
-  Widget _buildBody(BuildContext context, ColorScheme cs, TextTheme tt) {
-    final a = _album!;
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: <Widget>[
-        // ---------- 头部横幅（JM 官方风格：模糊封面背景 + 信息叠加） ----------
-        _HeaderBanner(
-          coverUrl: _coverUrl,
-          title: a.name,
-          author: a.authorText,
-          pills: <String>[
-            if (a.category.title.isNotEmpty) a.category.title,
-            if (a.categorySub.title.isNotEmpty) a.categorySub.title,
-          ],
-          albumId: a.id,
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              // ---------- 统计区（三分栏卡片） ----------
-              _StatsBar(
-                views: a.totalViews,
-                likes: a.totalLikes,
-                photos: '${a.totalPhotos}',
-              ),
-              // ---------- 操作按钮 ----------
-              const SizedBox(height: 14),
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    flex: 3,
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 13),
+    return Builder(
+      builder: (BuildContext c) => CustomScrollView(
+        key: const PageStorageKey<String>('intro-tab'),
+        slivers: <Widget>[
+          SliverOverlapInjector(handle: handle),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+            sliver: SliverList.list(
+              children: <Widget>[
+                // ---------- 图标操作行 ----------
+                Entrance(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        _IconAction(
+                          icon: album.liked
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          iconColor: album.liked
+                              ? const Color(0xFFFF5A78)
+                              : cs.onSurfaceVariant,
+                          label: '${formatCount(album.totalLikes)}喜欢',
+                          onTap: onToggleLike,
+                        ),
+                        _IconAction(
+                          icon: Icons.chat_bubble_outline_rounded,
+                          label:
+                              '${album.commentTotal > 0 ? formatCount(album.commentTotal) : ''}评论',
+                          onTap: onOpenComments,
+                        ),
+                        _IconAction(
+                          icon: Icons.visibility_outlined,
+                          label: '${formatCount(album.totalViews)}观看',
+                        ),
+                        _IconAction(
+                          icon: album.isFavorite
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_border_rounded,
+                          iconColor:
+                              album.isFavorite ? cs.primary : cs.onSurfaceVariant,
+                          label: '收藏',
+                          onTap: onToggleFavorite,
+                        ),
+                        _IconAction(
+                          icon: Icons.download_outlined,
+                          label: '下载',
+                          onTap: onDownload,
+                        ),
+                        _IconAction(
+                          icon: Icons.notifications_none_rounded,
+                          label: '连载通知',
+                          onTap: () => ScaffoldMessenger.of(context)
+                              .showSnackBar(const SnackBar(
+                                  content: Text('连载通知请在网页端设置'))),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ---------- 禁漫车 / 编号 ----------
+                Entrance(
+                  delay: const Duration(milliseconds: 40),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        '禁漫车',
+                        style: tt.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                      onPressed: () => _openReader(),
-                      icon: const Icon(Icons.play_arrow_rounded),
-                      label: Text(a.series.isEmpty ? '开始阅读' : '从第一章开始'),
-                    ),
+                      const SizedBox(height: 6),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(6),
+                        onTap: onCopyId,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Text(
+                            'JM${album.id}',
+                            style: tt.bodyMedium?.copyWith(
+                              color: cs.primary,
+                              fontFamily: 'monospace',
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text('页数：${album.totalPhotos}',
+                          style: tt.bodyMedium?.copyWith(
+                              color: cs.onSurfaceVariant)),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _RoundAction(
-                      icon: a.isFavorite
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_border_rounded,
-                      label: a.isFavorite ? '已收藏' : '收藏',
-                      active: a.isFavorite,
-                      onTap: _toggleFavorite,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _RoundAction(
-                      icon: a.liked
-                          ? Icons.favorite_rounded
-                          : Icons.favorite_border_rounded,
-                      label: a.liked ? '已赞' : '点赞',
-                      active: a.liked,
-                      onTap: _toggleLike,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _RoundAction(
-                      icon: Icons.download_rounded,
-                      label: '下载',
-                      active: false,
-                      onTap: _downloadAll,
+                ),
+                // ---------- 描述 ----------
+                if (album.description.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 16),
+                  Entrance(
+                    delay: const Duration(milliseconds: 80),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '描述',
+                          style: tt.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          stripHtmlTags(album.description),
+                          style: tt.bodyMedium?.copyWith(height: 1.65),
+                        ),
+                      ],
                     ),
                   ),
                 ],
-              ),
-              // ---------- 简介 ----------
-              if (a.description.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 18),
-                SectionHeader(title: '简介'),
-                Text(
-                  stripHtmlTags(a.description),
-                  style: tt.bodyMedium?.copyWith(height: 1.65),
-                ),
-              ],
-              // ---------- 标签 ----------
-              if (a.tags.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 18),
-                SectionHeader(title: '标签'),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: a.tags
-                      .map(
-                        (String t) => ActionChip(
-                          label: Text(t),
-                          labelStyle:
-                              TextStyle(fontSize: 12, color: cs.primary),
-                          visualDensity: VisualDensity.compact,
-                          side: BorderSide(
-                              color: cs.primary.withValues(alpha: 0.35)),
-                          onPressed: () => Navigator.pushNamed(
-                              context, '/search',
-                              arguments: t),
+                // ---------- 标签 ----------
+                if (album.tags.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 16),
+                  Entrance(
+                    delay: const Duration(milliseconds: 120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Text(
+                              '标签',
+                              style: tt.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(width: 6),
+                            InkWell(
+                              borderRadius: BorderRadius.circular(100),
+                              onTap: onTagHelp,
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: cs.primary,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.question_mark_rounded,
+                                    size: 13, color: Colors.white),
+                              ),
+                            ),
+                          ],
                         ),
-                      )
-                      .toList(),
-                ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: album.tags
+                              .map(
+                                (String t) => InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () => Navigator.pushNamed(
+                                      context, '/search',
+                                      arguments: t),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerHighest
+                                          .withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: cs.outlineVariant
+                                            .withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '#$t',
+                                      style: TextStyle(
+                                          fontSize: 13, color: cs.onSurface),
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // ---------- 作者 ----------
+                if (authors.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 16),
+                  Entrance(
+                    delay: const Duration(milliseconds: 160),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '作者',
+                          style: tt.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: authors
+                              .map(
+                                (String a) => InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () => Navigator.pushNamed(
+                                      context, '/search',
+                                      arguments: a),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: cs.surfaceContainerHighest
+                                          .withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: cs.outlineVariant
+                                            .withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '#$a',
+                                      style: TextStyle(
+                                          fontSize: 13, color: cs.onSurface),
+                                    ),
+                                  ),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                // ---------- 更多相关 ----------
+                if (album.works.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 16),
+                  Entrance(
+                    delay: const Duration(milliseconds: 200),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            '更多相关',
+                            style: tt.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          const SizedBox(height: 4),
+                          ...album.works.map(
+                            (AlbumWorks w) => ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(
+                                Icons.collections_bookmark_outlined,
+                                color: cs.primary,
+                                size: 20,
+                              ),
+                              title: Text(
+                                w.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: Icon(
+                                Icons.chevron_right_rounded,
+                                color: cs.onSurfaceVariant,
+                              ),
+                              onTap: () => onOpenWork(w.id),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
-              // ---------- 章节 ----------
-              if (a.series.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 18),
-                SectionHeader(title: '章节 (${a.series.length})'),
-                ...a.series.map(
-                  (SeriesItem s) => Card(
-                    margin: const EdgeInsets.only(bottom: 8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 图标操作项（统计/操作通用，对齐截图：图标在上、文字在下）。
+class _IconAction extends StatelessWidget {
+  const _IconAction({
+    required this.icon,
+    required this.label,
+    this.onTap,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final color = iconColor ?? cs.onSurface;
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 5),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: cs.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------
+// 目录页签：无章节 = 页码网格；有章节 = 章节列表
+// ---------------------------------------------------------------------
+
+class _CatalogTab extends StatelessWidget {
+  const _CatalogTab({
+    required this.handle,
+    required this.album,
+    required this.onOpenReader,
+  });
+
+  final SliverOverlapAbsorberHandle handle;
+  final Album album;
+  final void Function({String chapterId}) onOpenReader;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Builder(
+      builder: (BuildContext c) => CustomScrollView(
+        key: const PageStorageKey<String>('catalog-tab'),
+        slivers: <Widget>[
+          SliverOverlapInjector(handle: handle),
+          if (album.series.isEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.all(16),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 88,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 1.5,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (BuildContext c, int i) {
+                    return Material(
+                      color: cs.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => onOpenReader(),
+                        child: Center(
+                          child: Text(
+                            '${i + 1}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: cs.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  childCount: album.totalPhotos,
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+              sliver: SliverList.separated(
+                itemCount: album.series.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 8),
+                itemBuilder: (BuildContext c, int i) {
+                  final s = album.series[i];
+                  return Card(
+                    margin: EdgeInsets.zero,
                     child: ListTile(
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(
@@ -381,7 +1146,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                         ),
                       ),
                       title: Text(
-                        s.name,
+                        s.name.isEmpty ? '第${s.sort}话' : s.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -389,223 +1154,42 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                         Icons.chevron_right_rounded,
                         color: cs.onSurfaceVariant,
                       ),
-                      onTap: () => _openReader(chapterId: s.id),
+                      onTap: () => onOpenReader(chapterId: s.id),
                     ),
-                  ),
-                ),
-              ],
-              // ---------- 系列作品 ----------
-              if (a.works.isNotEmpty) ...<Widget>[
-                const SizedBox(height: 18),
-                SectionHeader(title: '系列作品'),
-                ...a.works.map(
-                  (AlbumWorks w) => Card(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      dense: true,
-                      leading: Icon(
-                        Icons.collections_bookmark_outlined,
-                        color: cs.primary,
-                      ),
-                      title: Text(
-                        w.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      trailing: Icon(
-                        Icons.chevron_right_rounded,
-                        color: cs.onSurfaceVariant,
-                      ),
-                      onTap: () => Navigator.pushReplacementNamed(
-                        context,
-                        '/album',
-                        arguments: w.id,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
+                  );
+                },
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
 
-/// 详情页头部横幅（JM 官方风格）：
-/// 封面高斯模糊铺满作为背景 + 深色渐变遮罩，前景叠加
-/// 封面原图 / 标题 / 作者 / 分类胶囊 / 编号。
-class _HeaderBanner extends StatelessWidget {
-  const _HeaderBanner({
-    required this.coverUrl,
-    required this.title,
-    required this.author,
-    required this.pills,
-    required this.albumId,
-  });
+// ---------------------------------------------------------------------
+// 评论页签：复用评论页（embedded 内嵌模式，无独立 Scaffold）。
+// 内层不是滚动视图，用 handle.layoutExtent 动态让出吸顶页签的位置。
+// ---------------------------------------------------------------------
 
-  final String coverUrl;
-  final String title;
-  final String author;
-  final List<String> pills;
-  final int albumId;
+class _CommentsTab extends StatelessWidget {
+  const _CommentsTab({required this.handle, required this.album});
+
+  final SliverOverlapAbsorberHandle handle;
+  final Album album;
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return RepaintBoundary(
-      child: Stack(
-        children: <Widget>[
-          // 背景层：封面模糊铺满（RepaintBoundary 限制重绘范围）
-          Positioned.fill(
-            child: coverUrl.isEmpty
-                ? ColoredBox(color: cs.surfaceContainerHighest)
-                : ClipRect(
-                    child: ImageFiltered(
-                      imageFilter: ui.ImageFilter.blur(
-                        sigmaX: 16,
-                        sigmaY: 16,
-                        tileMode: TileMode.decal,
-                      ),
-                      child: Transform.scale(
-                        scale: 1.15,
-                        child: ImageStoreCover(
-                          url: coverUrl,
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    ),
-                  ),
-          ),
-          // 遮罩层：保证前景文字可读
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: <Color>[
-                    Colors.black.withValues(alpha: 0.30),
-                    Colors.black.withValues(alpha: 0.55),
-                    Colors.black.withValues(alpha: 0.68),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          // 前景：封面 + 信息
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 16),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: <Widget>[
-                Hero(
-                  tag: 'cover-$albumId',
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          blurRadius: 18,
-                          offset: const Offset(0, 8),
-                        ),
-                      ],
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: SizedBox(
-                        width: 118,
-                        height: 157, // 3:4
-                        child: coverUrl.isEmpty
-                            ? Container(color: cs.surfaceContainerHighest)
-                            : ImageStoreCover(url: coverUrl),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        title,
-                        maxLines: 3,
-                        overflow: TextOverflow.ellipsis,
-                        style: tt.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white,
-                          height: 1.25,
-                          shadows: const <Shadow>[
-                            Shadow(blurRadius: 6, color: Colors.black54),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: <Widget>[
-                          const Icon(
-                            Icons.person_outline_rounded,
-                            size: 14,
-                            color: Colors.white70,
-                          ),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              author,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: tt.bodySmall
-                                  ?.copyWith(color: Colors.white70),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (pills.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: pills
-                              .map(
-                                (String p) => Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.16),
-                                    borderRadius: BorderRadius.circular(100),
-                                  ),
-                                  child: Text(
-                                    p,
-                                    style: const TextStyle(
-                                      fontSize: 11.5,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Text(
-                        '编号 #$albumId',
-                        style: tt.labelSmall?.copyWith(
-                          color: Colors.white60,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+    return AnimatedBuilder(
+      animation: handle,
+      builder: (BuildContext c, Widget? w) => Padding(
+        padding: EdgeInsets.only(top: handle.layoutExtent ?? 0),
+        child: w,
+      ),
+      child: AlbumCommentPage(
+        key: PageStorageKey<String>('comments-${album.id}'),
+        albumId: album.id.toString(),
+        albumName: album.name,
+        embedded: true,
       ),
     );
   }
@@ -665,152 +1249,6 @@ class _ImageStoreCoverState extends State<ImageStoreCover> {
           gaplessPlayback: true,
         );
       },
-    );
-  }
-}
-
-/// 统计条：浏览 / 喜欢 / 页数三分栏。
-class _StatsBar extends StatelessWidget {
-  const _StatsBar({
-    required this.views,
-    required this.likes,
-    required this.photos,
-  });
-
-  final String views;
-  final String likes;
-  final String photos;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: cs.outlineVariant.withValues(alpha: 0.4),
-        ),
-      ),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: _StatCell(
-              icon: Icons.visibility_outlined,
-              label: '浏览',
-              value: views,
-            ),
-          ),
-          Container(width: 1, height: 26, color: cs.outlineVariant),
-          Expanded(
-            child: _StatCell(
-              icon: Icons.favorite_rounded,
-              label: '喜欢',
-              value: likes,
-            ),
-          ),
-          Container(width: 1, height: 26, color: cs.outlineVariant),
-          Expanded(
-            child: _StatCell(
-              icon: Icons.auto_stories_outlined,
-              label: '页数',
-              value: photos,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 单个统计格。
-class _StatCell extends StatelessWidget {
-  const _StatCell({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 17, color: cs.primary),
-        const SizedBox(height: 4),
-        Text(
-          value,
-          style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 1),
-        Text(
-          label,
-          style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
-        ),
-      ],
-    );
-  }
-}
-
-/// 圆形操作按钮。
-class _RoundAction extends StatelessWidget {
-  const _RoundAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.active = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool active;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          color: active
-              ? cs.primary.withValues(alpha: 0.12)
-              : cs.surfaceContainerHighest.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: active
-                ? cs.primary.withValues(alpha: 0.4)
-                : cs.outlineVariant.withValues(alpha: 0.5),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 20,
-              color: active ? cs.primary : cs.onSurfaceVariant,
-            ),
-            const SizedBox(height: 3),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: active ? cs.primary : cs.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

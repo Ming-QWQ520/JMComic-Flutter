@@ -60,5 +60,19 @@
             <action android:name="android.intent.action.VIEW"/>
             <data android:mimeType="vnd.android.document/directory"/>
         </intent>
+        <!-- 打开链接（B站/GitHub/抖音等）：允许解析浏览器 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="http"/>
+        </intent>
+        <!-- 系统分享面板（详情页分享按钮） -->
+        <intent>
+            <action android:name="android.intent.action.SEND"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
     </queries>
 </manifest>

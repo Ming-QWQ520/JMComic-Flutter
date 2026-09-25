@@ -7,18 +7,29 @@ class AppTheme {
   AppTheme._();
 
   /// 按方案构建浅色/深色主题。
-  static ThemeData light([ThemeScheme scheme = ThemeScheme.lightOrange]) =>
-      _build(scheme, Brightness.light);
+  ///
+  /// [transparent] = 自定义背景图模式下，Scaffold / AppBar / 底栏
+  /// 背景透明化，让全局背景图层透出（阅读器自行指定黑色背景不受影响）。
+  static ThemeData light(
+          [ThemeScheme scheme = ThemeScheme.lightOrange,
+          bool transparent = false]) =>
+      _build(scheme, Brightness.light, transparent);
 
   /// 按方案构建深色主题。
-  static ThemeData dark([ThemeScheme scheme = ThemeScheme.darkOrange]) =>
-      _build(scheme, Brightness.dark);
+  static ThemeData dark(
+          [ThemeScheme scheme = ThemeScheme.darkOrange,
+          bool transparent = false]) =>
+      _build(scheme, Brightness.dark, transparent);
 
   /// 按方案 + 亮度构建（方案亮度与请求亮度不一致时以方案亮度为主）。
   static ThemeData of(ThemeScheme scheme) =>
       _build(scheme, scheme.isDark ? Brightness.dark : Brightness.light);
 
-  static ThemeData _build(ThemeScheme scheme, Brightness brightness) {
+  static ThemeData _build(
+    ThemeScheme scheme,
+    Brightness brightness, [
+    bool transparent = false,
+  ]) {
     final c = SchemeColors.of(scheme);
     final isDark = c.isDark;
     final ColorScheme colorScheme = ColorScheme.fromSeed(
@@ -33,7 +44,7 @@ class AppTheme {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      scaffoldBackgroundColor: c.bg,
+      scaffoldBackgroundColor: transparent ? Colors.transparent : c.bg,
       splashFactory: InkSparkle.splashFactory,
     );
 
@@ -42,7 +53,7 @@ class AppTheme {
         centerTitle: false,
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: c.bg,
+        backgroundColor: transparent ? Colors.transparent : c.bg,
         foregroundColor: isDark ? Colors.white : const Color(0xFF555555),
         titleTextStyle: TextStyle(
           fontSize: 19,
@@ -66,7 +77,7 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
         elevation: 0,
-        backgroundColor: c.surface,
+        backgroundColor: transparent ? Colors.transparent : c.surface,
         indicatorColor: c.primary.withValues(alpha: 0.16),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith((states) {

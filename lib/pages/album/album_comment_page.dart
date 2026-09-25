@@ -10,15 +10,22 @@ import '../../widgets/feedback.dart';
 /// 评论页（对齐 qt CommentView / SubCommentView）。
 ///
 /// 功能：评论分页加载、子评论展开、发送评论与回复、我的评论管理入口。
+///
+/// [embedded] 为 true 时作为详情页「评论」页签内嵌渲染：
+/// 不再自带 Scaffold/AppBar，直接输出列表 + 输入栏。
 class AlbumCommentPage extends StatefulWidget {
   const AlbumCommentPage({
     super.key,
     required this.albumId,
     this.albumName = '',
+    this.embedded = false,
   });
 
   final String albumId;
   final String albumName;
+
+  /// 详情页页签内嵌模式。
+  final bool embedded;
 
   @override
   State<AlbumCommentPage> createState() => _AlbumCommentPageState();
@@ -133,11 +140,20 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    // 内嵌模式（详情页「评论」页签）：直接输出列表 + 输入栏。
+    if (widget.embedded) {
+      return _buildBody(context, cs, tt);
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text('评论 ($_total)'),
       ),
-      body: Column(
+      body: _buildBody(context, cs, tt),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, ColorScheme cs, TextTheme tt) {
+    return Column(
         children: <Widget>[
           Expanded(
             child: _loading
@@ -229,7 +245,6 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
             ),
           ),
         ],
-      ),
     );
   }
 }

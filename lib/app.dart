@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -13,7 +16,23 @@ import 'pages/user/login_page.dart';
 import 'shell/root_page.dart';
 import 'state/app_state.dart';
 
-/// 应用根组件：主题 + 路由。
+/// 全局滚动行为：桌面端（Windows）默认只有触摸才能拖拽列表，
+/// 鼠标按住首页横滑分区/漫画网格拖不动。这里把鼠标/触控笔/触控板
+/// 全部纳入 dragDevices，桌面端体验与触摸一致；触摸端不受影响。
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Set<PointerDeviceKind> get dragDevices => const <PointerDeviceKind>{
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.trackpad,
+      };
+}
+
+/// 应用根组件：主题 + 路由 + 全局自定义背景。
 class JmComicApp extends StatelessWidget {
   const JmComicApp({super.key});
 
@@ -22,12 +41,14 @@ class JmComicApp extends StatelessWidget {
     return Consumer<AppState>(
       builder: (BuildContext context, AppState state, _) {
         final scheme = state.scheme;
+        final hasBg = state.hasCustomBackground;
         return MaterialApp(
           title: 'JMComic-Flutter',
-          theme: AppTheme.light(scheme),
-          darkTheme: AppTheme.dark(scheme),
+          theme: AppTheme.light(scheme, hasBg),
+          darkTheme: AppTheme.dark(scheme, hasBg),
           themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
           debugShowCheckedModeBanner: false,
+          scrollBehavior: const AppScrollBehavior(),
           // 关键修复：必须显式提供本地化委托。此前未配置，新版本 Flutter
           // 不再自动注入 Material 本地化，导致 TextField/BackButton/Slider
           // 等组件首次构建时 MaterialLocalizations.of 直接空指针崩溃，
@@ -58,7 +79,17 @@ class JmComicApp extends StatelessWidget {
                 systemNavigationBarDividerColor: Colors.transparent,
                 systemNavigationBarContrastEnforced: false,
               ),
-              child: child!,
+              // 自定义背景：垫在 Navigator 之下，全页面透出
+              // （阅读器自设黑色 Scaffold 背景，天然不受影响）。
+              child: hasBg
+                  ? Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        _AppBackground(path: state.backgroundPath),
+                        child!,
+                      ],
+                    )
+                  : child!,
             );
           },
           onGenerateRoute: (RouteSettings settings) {
@@ -117,6 +148,50 @@ class JmComicApp extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// 全局自定义背景图层：按屏宽 × DPR 限宽解码（控制内存），
+/// 上层叠一层主题色半透明遮罩保证前景内容可读。
+/// 文件缺失时自动清除设置并回落默认背景。
+class _AppBackground extends StatefulWidget {
+  const _AppBackground({required this.path});
+
+  final String path;
+
+  @override
+  State<_AppBackground> createState() => _AppBackgroundState();
+}
+
+class _AppBackgroundState extends State<_AppBackground> {
+  @override
+  Widget build(BuildContext context) {
+    final scheme = context.read<AppState>().scheme;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final decodeW =
+        (MediaQuery.sizeOf(context).width * dpr).round().clamp(480, 2048);
+    final Color scrim = scheme.isDark
+        ? Colors.black.withValues(alpha: 0.52)
+        : Colors.white.withValues(alpha: 0.58);
+    final f = File(widget.path);
+    return RepaintBoundary(
+      child: Stack(
+        fit: StackFit.expand,
+        children: <Widget>[
+          if (f.existsSync())
+            Image.file(
+              f,
+              key: ValueKey<String>('bg-${widget.path}'),
+              fit: BoxFit.cover,
+              alignment: Alignment.center,
+              cacheWidth: decodeW,
+              gaplessPlayback: true,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ColoredBox(color: scrim),
+        ],
+      ),
     );
   }
 }

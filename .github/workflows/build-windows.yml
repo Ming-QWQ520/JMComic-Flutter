@@ -1,0 +1,65 @@
+name: CI (Windows x64)
+
+# Windows 桌面版构建（自 build.yml 拆分，可独立手动触发）。
+#
+# 注意：本工作流会把 windows zip 附加到 rolling release（tag=latest）。
+# Android 的 build.yml 末尾会删除并重建 latest release——因此建议在
+# build.yml 本次运行完成之后再触发本工作流，否则刚附加的 zip 会随
+# latest release 重建而丢失（artifact 不受影响）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter 3.47.5
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Pub get
+        run: flutter pub get
+
+      - name: Build Windows (release)
+        run: flutter build windows --release
+
+      - name: Pack portable zip
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(.+?)\+' | ForEach-Object { $_.Matches[0].Groups[1].Value })
+          $out = "dist/JMComic-Flutter-v$version-windows-x64.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $out -Force
+          Get-ChildItem dist
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JMComic-Flutter-Windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+      # 附加到 rolling release（tag=latest）或版本标签对应的 Release。
+      # Release 尚不存在时自动创建；异常失败不阻塞，产物仍可从
+      # Actions artifact 下载。
+      - name: Attach to release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          TAG=$(case "$GITHUB_REF" in refs/tags/v*) echo "$GITHUB_REF_NAME" ;; *) echo "latest" ;; esac)
+          gh release upload "$TAG" dist/*.zip --clobber --repo "$GITHUB_REPOSITORY" \
+            || gh release create "$TAG" dist/*.zip --repo "$GITHUB_REPOSITORY" \
+                 --title "JMComic-Flutter Windows 构建" --generate-notes \
+            || echo "::warning::Release $TAG 上传失败，Windows 产物仅保留在 Actions artifact"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
