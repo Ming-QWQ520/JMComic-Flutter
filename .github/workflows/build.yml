@@ -1,4 +1,4 @@
-name: Android Build(Android APK)
+name: Android Build (Android APK)
 
 # 仅手动触发：在 Actions 页面点击 "Run workflow" 或通过 API
 # workflow_dispatch 触发构建（推送/打标签不再自动编译）。
