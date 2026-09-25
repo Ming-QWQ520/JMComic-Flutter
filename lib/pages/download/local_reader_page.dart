@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/constants.dart';
 import '../../state/app_state.dart';
 
 /// 本地离线阅读器（对齐 qt local_read_view）。
@@ -75,18 +76,6 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
     });
   }
 
-  void _nextPage() {
-    if (_currentPage < _files.length - 1) {
-      _jumpToPage(_currentPage + 1);
-    }
-  }
-
-  void _prevPage() {
-    if (_currentPage > 0) {
-      _jumpToPage(_currentPage - 1);
-    }
-  }
-
   void _jumpToPage(int i) {
     if (i < 0 || i >= _files.length) return;
     if (_direction == ReadDirection.vertical) {
@@ -126,7 +115,10 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
       }
     }
     if (found != null && found != _currentPage) {
-      setState(() => _currentPage = found);
+      // 闭包内不能依赖外部 `found != null` 的类型提升（Dart 限制），
+      // 故先用 non-nullable 局部变量接住，再交给 setState。
+      final newPage = found;
+      setState(() => _currentPage = newPage);
     }
     return false;
   }
