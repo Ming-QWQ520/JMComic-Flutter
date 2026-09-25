@@ -56,15 +56,33 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
 
   @override
   void dispose() {
+    _scroll.removeListener(_onScroll);
     _scroll.dispose();
     _input.dispose();
     super.dispose();
   }
 
+  /// 仅在 standalone 模式（自带 ScrollController）下监听滚动加载更多；
+  /// embedded 模式下用 NotificationListener 替代，避免抢走 primary 控制。
   void _onScroll() {
+    if (widget.embedded) return;
+    if (!_scroll.hasClients) return;
     if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 600) {
       _loadMore();
     }
+  }
+
+  /// 内嵌模式下用 NotificationListener 触发加载更多（不与 PrimaryScrollController
+  /// 抢夺控制权）。
+  bool _onScrollNotification(ScrollNotification n) {
+    if (n.depth != 0) return false;
+    if (n is! ScrollUpdateNotification && n is! ScrollEndNotification) {
+      return false;
+    }
+    if (n.metrics.pixels > n.metrics.maxScrollExtent - 600) {
+      _loadMore();
+    }
+    return false;
   }
 
   Future<void> _load() async {
@@ -153,32 +171,42 @@ class _AlbumCommentPageState extends State<AlbumCommentPage> {
   }
 
   Widget _buildBody(BuildContext context, ColorScheme cs, TextTheme tt) {
+    // 内嵌模式下：ListView 用 PrimaryScrollController 参与外层
+    // NestedScrollView 协同；NotificationListener 替代自带 _scroll
+    // 触发加载更多，避免与 PrimaryScrollController 抢控制权。
+    final Widget listWidget = _loading
+        ? const LoadingView()
+        : _error.isNotEmpty
+            ? ErrorView(message: _error, onRetry: _load)
+            : _comments.isEmpty
+                ? const EmptyView(message: '暂无评论，快来抢沙发')
+                : NotificationListener<ScrollNotification>(
+                    onNotification: _onScrollNotification,
+                    child: ListView.separated(
+                      // 内嵌模式：null controller + primary:true 走 PrimaryScrollController；
+                      // 独立模式：用自带 _scroll 触发 _onScroll 加载更多。
+                      controller: widget.embedded ? null : _scroll,
+                      primary: widget.embedded ? true : null,
+                      padding: const EdgeInsets.all(14),
+                      itemCount: _comments.length + (_noMore ? 0 : 1),
+                      separatorBuilder: (_, _) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (_, i) {
+                        if (i >= _comments.length) {
+                          return const TailLoader();
+                        }
+                        return _CommentCard(
+                          comment: _comments[i],
+                          onReply: () =>
+                              setState(() => _replyTo = _comments[i]),
+                        );
+                      },
+                    ),
+                  );
     return Column(
         children: <Widget>[
           Expanded(
-            child: _loading
-                ? const LoadingView()
-                : _error.isNotEmpty
-                    ? ErrorView(message: _error, onRetry: _load)
-                    : _comments.isEmpty
-                        ? const EmptyView(message: '暂无评论，快来抢沙发')
-                        : ListView.separated(
-                            controller: _scroll,
-                            padding: const EdgeInsets.all(14),
-                            itemCount: _comments.length + (_noMore ? 0 : 1),
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 8),
-                            itemBuilder: (_, i) {
-                              if (i >= _comments.length) {
-                                return const TailLoader();
-                              }
-                              return _CommentCard(
-                                comment: _comments[i],
-                                onReply: () =>
-                                    setState(() => _replyTo = _comments[i]),
-                              );
-                            },
-                          ),
+            child: listWidget,
           ),
           // 底部输入栏
           SafeArea(

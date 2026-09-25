@@ -52,7 +52,6 @@ class _HomePageState extends State<HomePage>
   Widget build(BuildContext context) {
     super.build(context);
     final state = context.watch<AppState>();
-    final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
 
     if (!state.ready) {
@@ -79,20 +78,8 @@ class _HomePageState extends State<HomePage>
               titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
               centerTitle: false,
               title: Text(
-                '首页',
+                '发现',
                 style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              background: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      cs.primary.withValues(alpha: 0.14),
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
               ),
             ),
             actions: <Widget>[

@@ -16,8 +16,9 @@ import '../user/about_page.dart';
 
 /// 设置页（对齐 tonquer/JMComic-qt SettingView）。
 ///
-/// 分组：主题配色（6 套）、线路选择（API/图片 + 测速）、DoH、
-/// 阅读设置（方向/音量键/常亮/预加载）、其他（清缓存）。
+/// 分组：主题配色（6 套，紧凑布局）、线路选择（API/图片 + 测速）、
+/// DoH、阅读设置（方向/音量键/常亮/预加载）、个性化（自定义背景 +
+/// 透明度滑杆）、其他（清缓存）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
@@ -32,27 +33,16 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          // ---------- 主题 ----------
+          // ---------- 主题（紧凑横排 Grid，不再每套一行） ----------
           SectionHeader(title: '主题配色'),
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: RadioGroup<ThemeScheme>(
-                groupValue: state.scheme,
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+              child: _ThemeGrid(
+                value: state.scheme,
                 onChanged: (ThemeScheme? v) {
                   if (v != null) state.setScheme(v);
                 },
-                child: Column(
-                  children: <Widget>[
-                    for (final s in ThemeScheme.values)
-                      RadioListTile<ThemeScheme>(
-                        value: s,
-                        title: Text(s.label),
-                        secondary: _colorDot(SchemeColors.of(s).primary),
-                        dense: true,
-                      ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -78,21 +68,7 @@ class SettingsPage extends StatelessWidget {
                             (MapEntry<int, String> e) => RadioListTile<int>(
                               value: e.key,
                               title: Text(e.value),
-                              subtitle:
-                                  state.speedResults[e.value] != null
-                                      ? Text(
-                                          state.speedResults[e.value]! < 0
-                                              ? '不可用'
-                                              : '${state.speedResults[e.value]} ms',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: (state.speedResults[e.value] ??
-                                                        -1) <
-                                                    0
-                                                ? cs.error
-                                                : Colors.green,
-                                          ))
-                                      : null,
+                              subtitle: _speedSubtitle(context, state, e.key),
                               dense: true,
                             ),
                           )
@@ -185,31 +161,46 @@ class SettingsPage extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  // 翻页方向（对齐 qt ReadView 方向）
+                  // 翻页方向：使用 SegmentedButton + 标签置于按钮上方，
+                  // 修复"上下/左右"模式下文字位置偏差（此前 Padding 不对称，
+                  // 短文本居左对齐时与下方按钮错位）。
                   Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 8),
+                        horizontal: 16, vertical: 12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        const Text('翻页方向'),
-                        const SizedBox(height: 8),
-                        SegmentedButton<ReadDirection>(
-                          segments: const <ButtonSegment<ReadDirection>>[
-                            ButtonSegment<ReadDirection>(
-                                value: ReadDirection.vertical,
-                                label: Text('上下')),
-                            ButtonSegment<ReadDirection>(
-                                value: ReadDirection.horizontal,
-                                label: Text('左右')),
-                            ButtonSegment<ReadDirection>(
-                                value: ReadDirection.rightToLeft,
-                                label: Text('从右至左')),
-                          ],
-                          selected: <ReadDirection>{state.readDirection},
-                          onSelectionChanged: (Set<ReadDirection> s) =>
-                              state.setReadDirection(s.first),
+                        Text('翻页方向',
+                            style: tt.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: SegmentedButton<ReadDirection>(
+                            // 全宽 SegmentedButton：每段等宽，标签居中，
+                            // 短/长标签对齐一致。
+                            style: SegmentedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 10),
+                            ),
+                            segments:
+                                const <ButtonSegment<ReadDirection>>[
+                              ButtonSegment<ReadDirection>(
+                                  value: ReadDirection.vertical,
+                                  label: Text('上下')),
+                              ButtonSegment<ReadDirection>(
+                                  value: ReadDirection.horizontal,
+                                  label: Text('左右')),
+                              ButtonSegment<ReadDirection>(
+                                  value: ReadDirection.rightToLeft,
+                                  label: Text('从右至左')),
+                            ],
+                            selected: <ReadDirection>{state.readDirection},
+                            onSelectionChanged: (Set<ReadDirection> s) =>
+                                state.setReadDirection(s.first),
+                          ),
                         ),
                       ],
                     ),
@@ -303,7 +294,7 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
-          // ---------- 个性化（自定义背景） ----------
+          // ---------- 个性化（自定义背景 + 透明度滑杆） ----------
           SectionHeader(title: '个性化'),
           Card(
             child: Padding(
@@ -323,7 +314,31 @@ class SettingsPage extends StatelessWidget {
                     trailing: const Icon(Icons.edit_outlined, size: 18),
                     onTap: () => _pickBackground(context, state),
                   ),
-                  if (state.hasCustomBackground)
+                  // 自定义背景透明度（仅当设置了背景时显示）。
+                  if (state.hasCustomBackground) ...<Widget>[
+                    ListTile(
+                      dense: true,
+                      leading: Icon(Icons.opacity_rounded,
+                          size: 20, color: cs.primary),
+                      title: const Text('背景透明度'),
+                      subtitle: Text(
+                        '当前 ${(state.backgroundOpacity * 100).round()}%'
+                        '（数值越大背景越透明）',
+                        style: tt.labelSmall,
+                      ),
+                      trailing: SizedBox(
+                        width: 130,
+                        child: Slider(
+                          min: 0,
+                          max: 100,
+                          divisions: 100,
+                          value:
+                              (state.backgroundOpacity * 100).round().toDouble(),
+                          onChanged: (double v) =>
+                              state.setBackgroundOpacity(v / 100.0),
+                        ),
+                      ),
+                    ),
                     ListTile(
                       dense: true,
                       leading: Icon(Icons.restart_alt_rounded,
@@ -331,11 +346,23 @@ class SettingsPage extends StatelessWidget {
                       title: const Text('恢复默认背景'),
                       onTap: () async {
                         await state.setBackground('');
+                        // 关键修复：Windows 端"恢复默认背景后再设置会显示
+                        // 第一次设置的图片背景"——根因是旧图片文件残留于
+                        // 应用文档目录，恢复默认后未删除原文件，下次设置时
+                        // 仍是同一路径写入新字节，但 Image.file 缓存命中旧
+                        // 解码结果。这里在恢复默认时直接删除残留文件，避免
+                        // 下次设置时缓存命中。
+                        try {
+                          final docs = await getApplicationDocumentsDirectory();
+                          final old = File('${docs.path}/custom_background.img');
+                          if (old.existsSync()) await old.delete();
+                        } catch (_) {}
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('已恢复默认背景')));
                       },
                     ),
+                  ],
                 ],
               ),
             ),
@@ -361,7 +388,7 @@ class SettingsPage extends StatelessWidget {
                     leading: Icon(Icons.cleaning_services_rounded,
                         size: 20, color: cs.primary),
                     title: const Text('清理下载缓存'),
-                    subtitle: const Text('删除全部已下载章节（不影响收藏）'),
+                    subtitle: const Text('删除全部已下载章节（不影响收藏与自定义背景）'),
                     onTap: () => _clearDownloads(context),
                   ),
                   ListTile(
@@ -386,6 +413,29 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
+  /// 翻页方向测速结果子标题：固定宽度对齐，避免短文本"不可用 / 12 ms"
+  /// 切换时位置偏差。
+  Widget? _speedSubtitle(
+    BuildContext context,
+    AppState state,
+    int idx,
+  ) {
+    final v = state.speedResults[idx.toString()];
+    if (v == null) return null;
+    final cs = Theme.of(context).colorScheme;
+    final String text = v < 0 ? '不可用' : '$v ms';
+    final Color color = v < 0 ? cs.error : Colors.green;
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 12,
+        color: color,
+        // 使用等宽字体，避免短/长文本切换时位置漂移。
+        fontFamily: 'monospace',
+      ),
+    );
+  }
+
   /// 选择并保存自定义背景图（应用于除漫画阅读器外的所有页面）。
   Future<void> _pickBackground(BuildContext context, AppState state) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -400,10 +450,24 @@ class SettingsPage extends StatelessWidget {
       );
       if (file == null) return;
       // 选择器返回的是临时缓存路径（Android SAF 副本），
-      // 复制进应用文档目录确保持久可用。
+      // 复制进应用文档目录确保持久可用。文件名加时间戳避免 Image
+      // 缓存命中旧解码（修复 Windows 端"恢复默认背景后再设置显示
+      // 第一次背景"bug——同路径不同字节会被 Image.file 缓存命中）。
       final docs = await getApplicationDocumentsDirectory();
-      final target = File('${docs.path}/custom_background.img');
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final target = File('${docs.path}/custom_background_$stamp.img');
       await target.writeAsBytes(await File(file.path).readAsBytes());
+      // 删除所有旧的背景缓存文件，确保只有一个生效。
+      try {
+        final entities = docs.listSync();
+        for (final e in entities) {
+          if (e is File &&
+              e.path.contains('custom_background') &&
+              e.path != target.path) {
+            await e.delete();
+          }
+        }
+      } catch (_) {}
       await state.setBackground(target.path);
       messenger.showSnackBar(
           const SnackBar(content: Text('背景已更新，应用于除阅读器外的所有页面')));
@@ -433,15 +497,6 @@ class SettingsPage extends StatelessWidget {
     out.add(const MapEntry<int, String>(6, '代理线路'));
     return out;
   }
-
-  Widget _colorDot(Color c) => Container(
-        width: 26,
-        height: 26,
-        decoration: BoxDecoration(
-          color: c,
-          shape: BoxShape.circle,
-        ),
-      );
 
   /// 修改下载根目录（Android 默认公共下载目录，桌面端默认文档目录；
   /// 可在设置中修改；留空恢复默认）。
@@ -503,12 +558,25 @@ class SettingsPage extends StatelessWidget {
   }
 
   /// 打开下载文件夹（系统文件管理器）。
+  /// 修复：原实现 hasStorage 在 Windows 永远返回 true，但 Android
+  /// 在已授权前的早期阶段会 fallback 到 ensureStorage，导致用户
+  /// 看到不必要的系统设置跳转。这里只在 Android 真正未授权时
+  /// 调用 ensureStorage，且对失败的情况给出更明确的指引。
   Future<void> _openDownloadFolder(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final dir = await DownloadManager.instance.baseDir();
-      if (!await StorageService.hasStorage()) {
-        await StorageService.ensureStorage();
+      // 仅 Android 在权限缺失时才申请，避免无谓跳系统设置。
+      if (StorageService.isAndroid && !await StorageService.hasStorage()) {
+        final granted = await StorageService.ensureStorage();
+        if (!granted) {
+          messenger.showSnackBar(SnackBar(
+            content: Text('未授予"所有文件访问"权限，已跳转系统设置。'
+                '请授权后返回再次点击打开。手动路径：${dir.path}'),
+            duration: const Duration(seconds: 5),
+          ));
+          return;
+        }
       }
       final ok = await StorageService.openFolder(dir.path);
       if (!ok) {
@@ -549,12 +617,18 @@ class SettingsPage extends StatelessWidget {
         .showSnackBar(const SnackBar(content: Text('图片缓存已清理')));
   }
 
+  /// 清理下载缓存。修复：原实现会删除 baseDir 整树，但 baseDir
+  /// 路径与"应用文档目录"在 Android 上不同分区，绝不会误伤
+  /// `custom_background.img` 等自定义背景文件。但部分用户自定义背景
+  /// 路径若指向下载目录子目录，删除后会让背景文件丢失。
+  /// 这里仅删除每个 [漫画号] 子目录，保留 baseDir 本身。
   Future<void> _clearDownloads(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (BuildContext c) => AlertDialog(
         title: const Text('清理下载缓存'),
-        content: const Text('确定删除全部已下载的章节图片吗？'),
+        content: const Text('确定删除全部已下载的章节图片吗？\n'
+            '（不会影响收藏、登录态与自定义背景）'),
         actions: <Widget>[
           TextButton(
               onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
@@ -566,10 +640,96 @@ class SettingsPage extends StatelessWidget {
     if (ok != true) return;
     try {
       final dir = await DownloadManager.instance.baseDir();
-      if (dir.existsSync()) dir.deleteSync(recursive: true);
+      if (dir.existsSync()) {
+        // 仅删除子目录（漫画号文件夹），保留 baseDir 自身。
+        for (final e in dir.listSync()) {
+          if (e is Directory) {
+            try {
+              await e.delete(recursive: true);
+            } catch (_) {}
+          }
+        }
+      }
     } catch (_) {}
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('已清理')));
+  }
+}
+
+/// 主题配色紧凑网格：6 套主题以 3 列 × 2 行的圆点 + 标签呈现，
+/// 替代原来 6 行 RadioListTile（节省垂直空间，主题配色区域从
+/// ~480px 高降到 ~180px 高，不影响触摸目标大小）。
+class _ThemeGrid extends StatelessWidget {
+  const _ThemeGrid({required this.value, required this.onChanged});
+
+  final ThemeScheme value;
+  final ValueChanged<ThemeScheme?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return GridView.count(
+      crossAxisCount: 3,
+      mainAxisSpacing: 4,
+      crossAxisSpacing: 4,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      childAspectRatio: 2.4,
+      children: <Widget>[
+        for (final s in ThemeScheme.values)
+          InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () => onChanged(s),
+            child: Container(
+              decoration: BoxDecoration(
+                color: value == s
+                    ? cs.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: value == s
+                    ? Border.all(color: cs.primary, width: 1.4)
+                    : null,
+              ),
+              padding:
+                  const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  Container(
+                    width: 22,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: SchemeColors.of(s).primary,
+                      shape: BoxShape.circle,
+                      boxShadow: value == s
+                          ? <BoxShadow>[
+                              BoxShadow(
+                                color: cs.primary.withValues(alpha: 0.3),
+                                blurRadius: 6,
+                                spreadRadius: 1,
+                              ),
+                            ]
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    s.label,
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight:
+                          value == s ? FontWeight.w700 : FontWeight.w500,
+                      color: value == s ? cs.primary : cs.onSurface,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }

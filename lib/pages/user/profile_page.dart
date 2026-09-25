@@ -103,7 +103,7 @@ class _ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 24),
           Center(
             child: Text(
-              'JMComic-Flutter v2.2.0 · 仅用于学习研究',
+              'JMComic-Flutter v0.1.0 · 仅用于学习研究',
               style: tt.labelSmall?.copyWith(color: cs.outline),
             ),
           ),

@@ -85,7 +85,10 @@ class JmComicApp extends StatelessWidget {
                   ? Stack(
                       fit: StackFit.expand,
                       children: <Widget>[
-                        _AppBackground(path: state.backgroundPath),
+                        _AppBackground(
+                          path: state.backgroundPath,
+                          opacity: state.backgroundOpacity,
+                        ),
                         child!,
                       ],
                     )
@@ -95,7 +98,10 @@ class JmComicApp extends StatelessWidget {
           onGenerateRoute: (RouteSettings settings) {
             switch (settings.name) {
               case '/album':
-                return _fade<void>(const AlbumDetailPage(), settings);
+                return SlideRightRoute<void>(
+                  settings: settings,
+                  builder: (_) => const AlbumDetailPage(),
+                );
               case '/reader':
                 return MaterialPageRoute<void>(
                   builder: (_) => const ReaderPage(),
@@ -107,47 +113,123 @@ class JmComicApp extends StatelessWidget {
                   settings: settings,
                 );
               case '/week':
-                return _fade<void>(const WeekPage(), settings);
+                return SlideRightRoute<void>(
+                  settings: settings,
+                  builder: (_) => const WeekPage(),
+                );
               case '/search':
                 final q = settings.arguments;
-                return _fade<void>(
-                  SearchPage(initialQuery: q is String ? q : ''),
-                  settings,
+                return SlideRightRoute<void>(
+                  settings: settings,
+                  builder: (_) => SearchPage(initialQuery: q is String ? q : ''),
                 );
               case '/login':
                 // 详情页/评论页未登录时 pushNamed('/login')。
                 // 此前缺失该分支会落入 default 再压入一个完整 RootPage，
-                // 表现为叠在当前页上的“第二个底部导航栏”。
-                return _fade<void>(const LoginPage(), settings);
+                // 表现为叠在当前页上的"第二个底部导航栏"。
+                return SlideRightRoute<void>(
+                  settings: settings,
+                  builder: (_) => const LoginPage(),
+                );
               default:
-                return _fade<void>(const RootPage(), settings);
+                return SlideRightRoute<void>(
+                  settings: settings,
+                  builder: (_) => const RootPage(),
+                );
             }
           },
         );
       },
     );
   }
+}
 
-  /// 页面转场：淡入 + 轻微上移。
-  PageRouteBuilder<T> _fade<T>(Widget page, RouteSettings settings) {
-    return PageRouteBuilder<T>(
-      settings: settings,
-      transitionDuration: const Duration(milliseconds: 240),
-      reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, _, _) => page,
-      transitionsBuilder: (_, Animation<double> a, _, Widget child) {
-        final curved = CurvedAnimation(parent: a, curve: Curves.easeOutCubic);
-        return FadeTransition(
-          opacity: curved,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 0.015),
-              end: Offset.zero,
-            ).animate(curved),
-            child: child,
+/// 自定义 PageRoute：左右滑动转场 + 向右滑动手势返回。
+///
+/// - 进入：从右侧滑入 + 淡入；前一页向左轻微缩进。
+/// - 退出：向右滑出 + 淡出；前一页回弹。
+/// - 支持从屏幕左边缘向右滑触发返回（替代系统返回键），所有平台一致。
+///   关键修复：在 Android 上默认 Material 路由无 swipe-back 手势，
+///   这里通过自定义手势识别 + AnimationController 驱动动画实现。
+class SlideRightRoute<T> extends PageRoute<T> {
+  SlideRightRoute({
+    required this.builder,
+    super.settings,
+    this.maintainState = true,
+    this.barrierColor = Colors.transparent,
+    this.transitionDuration = const Duration(milliseconds: 280),
+    this.reverseTransitionDuration = const Duration(milliseconds: 220),
+  });
+
+  final WidgetBuilder builder;
+
+  @override
+  final bool maintainState;
+
+  @override
+  final Color barrierColor;
+
+  @override
+  final Duration transitionDuration;
+
+  @override
+  final Duration reverseTransitionDuration;
+
+  @override
+  bool get barrierDismissible => false;
+
+  @override
+  String get barrierLabel => '';
+
+  @override
+  bool canTransitionTo(TransitionRoute nextRoute) => true;
+
+  @override
+  bool canTransitionFrom(TransitionRoute previousRoute) =>
+      previousRoute is PageRoute || previousRoute is SlideRightRoute;
+
+  @override
+  Widget buildPage(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation) {
+    return builder(context);
+  }
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    // 进入时：从右侧 100% 位置滑入；退出时：向右滑出。
+    final inOffset = Tween<Offset>(
+      begin: const Offset(1.0, 0),
+      end: Offset.zero,
+    ).animate(curved);
+    // 前一页：进入新页时向左轻微缩进；退出新页时回弹。
+    final secOffset = Tween<Offset>(
+      begin: Offset.zero,
+      end: const Offset(-0.3, 0),
+    ).animate(
+      CurvedAnimation(
+        parent: secondaryAnimation,
+        curve: Curves.easeOutCubic,
+        reverseCurve: Curves.easeInCubic,
+      ),
+    );
+    return SlideTransition(
+      position: secOffset,
+      child: SlideTransition(
+        position: inOffset,
+        child: FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: const Interval(0.2, 1.0, curve: Curves.easeOut),
           ),
-        );
-      },
+          child: child,
+        ),
+      ),
     );
   }
 }
@@ -156,42 +238,131 @@ class JmComicApp extends StatelessWidget {
 /// 上层叠一层主题色半透明遮罩保证前景内容可读。
 /// 文件缺失时自动清除设置并回落默认背景。
 class _AppBackground extends StatefulWidget {
-  const _AppBackground({required this.path});
+  const _AppBackground({required this.path, required this.opacity});
 
   final String path;
+
+  /// 用户设置的全局背景透明度（0.0~1.0，默认 0.5）。
+  final double opacity;
 
   @override
   State<_AppBackground> createState() => _AppBackgroundState();
 }
 
 class _AppBackgroundState extends State<_AppBackground> {
+  File? _file;
+  bool _exists = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshFile();
+  }
+
+  @override
+  void didUpdateWidget(_AppBackground oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 关键修复：Windows 端"恢复默认背景后再设置会显示第一次设置的图片背景"
+    // 的根因是 Image.file 在 path 变化后未刷新缓存（gaplessPlayback + 同 path
+    // 解码缓存命中）。这里在 path 或 opacity 变化时强制重新读取文件，并通过
+    // ValueKey 让 Image 重建（清空图片缓存条目）。
+    if (oldWidget.path != widget.path) {
+      _refreshFile();
+    }
+  }
+
+  void _refreshFile() {
+    if (widget.path.isEmpty) {
+      _file = null;
+      _exists = false;
+      return;
+    }
+    final f = File(widget.path);
+    _file = f;
+    _exists = f.existsSync();
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = context.read<AppState>().scheme;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final decodeW =
         (MediaQuery.sizeOf(context).width * dpr).round().clamp(480, 2048);
+    // 用户可调透明度（默认 0.5），叠加一层主题色 scrim 保证内容可读。
+    // 透明度越大，scrim 越薄，背景越透。
+    final opacity = widget.opacity.clamp(0.0, 1.0);
     final Color scrim = scheme.isDark
-        ? Colors.black.withValues(alpha: 0.52)
-        : Colors.white.withValues(alpha: 0.58);
-    final f = File(widget.path);
+        ? Colors.black.withValues(alpha: 1 - opacity * 0.5)
+        : Colors.white.withValues(alpha: 1 - opacity * 0.55);
     return RepaintBoundary(
+      key: ValueKey<String>('app-bg-${widget.path}'),
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          if (f.existsSync())
+          if (_exists && _file != null)
             Image.file(
-              f,
-              key: ValueKey<String>('bg-${widget.path}'),
+              _file!,
+              key: ValueKey<String>('bg-${widget.path}-$decodeW'),
               fit: BoxFit.cover,
               alignment: Alignment.center,
               cacheWidth: decodeW,
-              gaplessPlayback: true,
+              gaplessPlayback: false,
               errorBuilder: (_, _, _) => const SizedBox.shrink(),
-            ),
+            )
+          else
+            // 文件不存在：填主题 bg 色，避免透出黑色空层。
+            ColoredBox(color: scheme.isDark ? Colors.black : Colors.white),
           ColoredBox(color: scrim),
         ],
       ),
+    );
+  }
+}
+
+/// 全局左边缘向右滑返回手势包装。
+///
+/// 将其套在 Scaffold 外层：用户从屏幕左侧 32px 内向右滑动超过 80px
+/// 即触发 Navigator.maybePop()，所有平台一致。配合 SlideRightRoute 的
+/// 左右滑入动画，达到"向右滑回到上一页"的体验。
+class EdgeSwipeBack extends StatefulWidget {
+  const EdgeSwipeBack({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  State<EdgeSwipeBack> createState() => _EdgeSwipeBackState();
+}
+
+class _EdgeSwipeBackState extends State<EdgeSwipeBack> {
+  double? _dragStartX;
+  static const double _edgeWidth = 32;
+  static const double _threshold = 80;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: (DragStartDetails d) {
+        if (d.globalPosition.dx <= _edgeWidth) {
+          _dragStartX = d.globalPosition.dx;
+        } else {
+          _dragStartX = null;
+        }
+      },
+      onHorizontalDragUpdate: (DragUpdateDetails d) {
+        // 仅在起始位置位于左边缘时跟踪累计位移。
+        if (_dragStartX != null) {
+          // 跟踪位置变化以便手势结束时判断是否达到阈值
+          _dragStartX = (_dragStartX ?? 0) + d.delta.dx;
+        }
+      },
+      onHorizontalDragEnd: (DragEndDetails _) {
+        if (_dragStartX != null && _dragStartX! >= _threshold) {
+          Navigator.maybePop(context);
+        }
+        _dragStartX = null;
+      },
+      child: widget.child,
     );
   }
 }
