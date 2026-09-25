@@ -1,9 +1,8 @@
 name: Android CI
 
+# 仅手动触发：在 Actions 页面点击 "Run workflow" 或通过 API
+# workflow_dispatch 触发构建（推送/打标签不再自动编译）。
 on:
-  push:
-    branches: [ main, master ]
-    tags: [ 'v*' ]
   workflow_dispatch:
 
 permissions:
