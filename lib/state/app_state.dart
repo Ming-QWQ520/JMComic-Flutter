@@ -18,7 +18,14 @@ enum ReadDirection { vertical, horizontal, rightToLeft }
 
 /// 全局应用状态：主题 / 阅读设置 / 登录态 / 线路与 DoH / 搜索历史。
 class AppState extends ChangeNotifier {
-  AppState();
+  AppState() {
+    // 桌面小组件「刷新」按钮 → 原生拉起 APP（jm_action=widget_refresh）
+    // → WidgetBridge 分发 → 重新拉取一批随机推荐写回 widget。
+    WidgetBridge.instance.registerAction(
+      'widget_refresh',
+      (_) => refreshWidgetRandomAlbum(),
+    );
+  }
 
   final JmApi api = JmApi.instance;
   final JmClient _c = JmClient.instance;
@@ -405,18 +412,23 @@ class AppState extends ChangeNotifier {
     unawaited(WidgetBridge.instance.writeUserName('未登录'));
   }
 
-  /// 拉取一部随机推荐并写入桌面小组件（widget 显示封面/名称/JM号）。
-  /// 由 init() 末尾触发一次，用户在 widget 点「刷新」也会触发。
+  /// 拉取一批随机推荐并写入桌面小组件（多页轮播：封面/名称/JM号）。
+  ///
+  /// 触发时机：APP 冷启动 init()、widget 上点「刷新」（widget_refresh
+  /// 动作经原生 → WidgetBridge → 本方法，见构造函数注册）。
   Future<void> refreshWidgetRandomAlbum() async {
     try {
       final list = await api.getRandomRecommend();
       if (list.isEmpty) return;
-      final a = list.first;
-      unawaited(WidgetBridge.instance.writeRandomAlbum(
-        name: a.name,
-        id: a.id,
-        coverUrl: api.coverUrl(a.id),
-      ));
+      final albums = <Map<String, String>>[
+        for (final a in list.take(6))
+          <String, String>{
+            'name': a.name,
+            'id': a.id,
+            'coverUrl': api.coverUrl(a.id, updateAt: a.updateAt),
+          },
+      ];
+      await WidgetBridge.instance.writeRandomAlbums(albums);
     } catch (_) {
       // 静默失败：widget 不应阻塞主流程
     }

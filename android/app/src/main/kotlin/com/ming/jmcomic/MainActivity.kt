@@ -125,12 +125,15 @@ class MainActivity : FlutterActivity() {
                         )
                         result.success(true)
                     }
-                    "writeRandomAlbum" -> {
-                        val name = call.argument<String>("name") ?: ""
-                        val id = call.argument<String>("id") ?: ""
-                        val coverUrl = call.argument<String>("coverUrl") ?: ""
-                        JmHomeWidgetProvider.writeRandomAlbum(
-                            this@MainActivity, name, id, coverUrl
+                    "writeRandomAlbums" -> {
+                        // 一批随机推荐：[{name,id,coverUrl}, ...]，
+                        // widget 按 ViewFlipper 多页轮播展示
+                        @Suppress("UNCHECKED_CAST")
+                        val albums =
+                            (call.argument<List<Any>>("albums") ?: emptyList())
+                                .filterIsInstance<Map<String, Any>>()
+                        JmHomeWidgetProvider.writeRandomAlbums(
+                            this@MainActivity, albums
                         )
                         result.success(true)
                     }

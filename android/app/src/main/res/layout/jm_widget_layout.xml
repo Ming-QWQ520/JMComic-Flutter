@@ -1,125 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  小组件布局：双页（用户页 / 随机推荐页），用 ViewFlipper 左右滑动切换。
-  - ViewFlipper.setFlipInterval + 手势检测实现左右滑切换
-  - 用户页：欢迎 + 用户名 + 跳转按钮
-  - 随机推荐页：封面 + 名称 + JM号
-  RemoteViews 不支持复杂手势，setFlipInterval 自动轮播由
-  JmHomeWidgetProvider 在 update 时控制；用户通过点击切换按钮切页。
+  桌面小组件布局：随机推荐轮播（每页一部漫画：封面 + 名称 + JM号）。
+
+  - ViewFlipper(@+id/flipper) 的子页由 JmHomeWidgetProvider 通过
+    RemoteViews.addView 动态添加（每页对应 layout/jm_widget_page.xml），
+    左右翻页由底部 ◀ / ▶ 按钮触发（RemoteViews 不支持触摸手势，
+    横滑会被桌面自身拦截为换屏，故用按钮翻页）；
+  - 底部行：页码指示 + ◀ ▶ ⟳（刷新拉取新一批随机推荐）；
+  - 刷新按钮通过 PendingIntent 拉起 APP（jm_action=widget_refresh），
+    由 Flutter 端重新请求随机推荐并写回 widget。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="8dp"
+    android:padding="6dp"
     android:background="#7A1F2A33">
 
-    <ViewFlipper
-        android:id="@+id/flipper"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:inAnimation="@android:anim/fade_in"
-        android:outAnimation="@android:anim/fade_out">
+        android:orientation="vertical">
 
-        <!-- 页 1：用户页 -->
+        <!-- 随机推荐轮播页容器（子页动态添加） -->
+        <ViewFlipper
+            android:id="@+id/flipper"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:inAnimation="@android:anim/fade_in"
+            android:outAnimation="@android:anim/fade_out" />
+
+        <!-- 底部操作行：页码 + 左右翻页 + 刷新 -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
+            android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="10dp">
+            android:gravity="center_vertical">
 
-            <ImageView
-                android:id="@+id/userAvatar"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:src="@mipmap/ic_launcher"
-                android:contentDescription="用户头像" />
-
-            <LinearLayout
+            <TextView
+                android:id="@+id/pageIndex"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:orientation="vertical"
                 android:paddingStart="10dp"
-                android:paddingEnd="10dp">
-
-                <TextView
-                    android:id="@+id/userName"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="未登录"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="15sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/userSubtitle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="点击打开 APP"
-                    android:textColor="#CCFFFFFF"
-                    android:textSize="11sp" />
-
-            </LinearLayout>
+                android:text="1/1"
+                android:textColor="#99FFFFFF"
+                android:textSize="10sp" />
 
             <ImageButton
-                android:id="@+id/btnOpenApp"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:id="@+id/btnPrev"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
-                android:src="@android:drawable/ic_media_play" />
-        </LinearLayout>
-
-        <!-- 页 2：随机推荐 -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:padding="10dp">
-
-            <ImageView
-                android:id="@+id/albumCover"
-                android:layout_width="56dp"
-                android:layout_height="80dp"
-                android:scaleType="centerCrop"
-                android:src="@mipmap/ic_launcher"
-                android:contentDescription="漫画封面" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical"
-                android:paddingStart="10dp"
-                android:paddingEnd="6dp">
-
-                <TextView
-                    android:id="@+id/albumName"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="随机推荐"
-                    android:textColor="#FFFFFFFF"
-                    android:textSize="13sp"
-                    android:textStyle="bold"
-                    android:maxLines="2"
-                    android:ellipsize="end" />
-
-                <TextView
-                    android:id="@+id/albumId"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="JM:"
-                    android:textColor="#99FFFFFF"
-                    android:textSize="11sp" />
-            </LinearLayout>
+                android:src="@android:drawable/ic_media_previous"
+                android:contentDescription="上一部" />
 
             <ImageButton
-                android:id="@+id/btnNextRandom"
-                android:layout_width="36dp"
-                android:layout_height="36dp"
+                android:id="@+id/btnNext"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
-                android:src="@android:drawable/ic_popup_reminder" />
+                android:src="@android:drawable/ic_media_next"
+                android:contentDescription="下一部" />
+
+            <ImageButton
+                android:id="@+id/btnRefresh"
+                android:layout_width="34dp"
+                android:layout_height="30dp"
+                android:background="?android:attr/selectableItemBackground"
+                android:src="@android:drawable/ic_popup_sync"
+                android:contentDescription="换一批随机推荐" />
         </LinearLayout>
-    </ViewFlipper>
+    </LinearLayout>
 </FrameLayout>
