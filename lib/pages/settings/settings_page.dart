@@ -488,14 +488,24 @@ class SettingsPage extends StatelessWidget {
   Future<void> _pickBackground(BuildContext context, AppState state) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final file = await openFile(
-        acceptedTypeGroups: <XTypeGroup>[
-          const XTypeGroup(
-            label: '图片',
-            extensions: <String>['png', 'jpg', 'jpeg', 'webp', 'gif'],
-          ),
-        ],
-      );
+      // Windows/Android 通用：mimeTypes + extensions 双条件，
+      // 兼容不同平台文件对话框的过滤实现。
+      XFile? picked;
+      try {
+        picked = await openFile(
+          acceptedTypeGroups: <XTypeGroup>[
+            const XTypeGroup(
+              label: '图片',
+              mimeTypes: <String>['image/png', 'image/jpeg', 'image/webp'],
+              extensions: <String>['png', 'jpg', 'jpeg', 'webp'],
+            ),
+          ],
+        );
+      } catch (_) {
+        // 部分平台/版本 openFile 可能不可用：回退到任意文件选择。
+        picked = await openFile();
+      }
+      final XFile? file = picked;
       if (file == null) return;
       // 选择器返回的是临时缓存路径（Android SAF 副本），
       // 复制进应用文档目录确保持久可用。文件名加时间戳避免 Image
@@ -504,7 +514,13 @@ class SettingsPage extends StatelessWidget {
       final docs = await getApplicationDocumentsDirectory();
       final stamp = DateTime.now().millisecondsSinceEpoch;
       final target = File('${docs.path}/custom_background_$stamp.img');
-      await target.writeAsBytes(await File(file.path).readAsBytes());
+      final bytes = await File(file.path).readAsBytes();
+      if (bytes.isEmpty) {
+        messenger.showSnackBar(
+            const SnackBar(content: Text('所选文件为空，请重新选择图片')));
+        return;
+      }
+      await target.writeAsBytes(bytes);
       // 删除所有旧的背景缓存文件，确保只有一个生效。
       try {
         final entities = docs.listSync();
@@ -516,6 +532,24 @@ class SettingsPage extends StatelessWidget {
           }
         }
       } catch (_) {}
+      // 先解码验证（Windows 上失败要立刻给出可读原因，而不是
+      // 静默落到 errorBuilder 的"设置成功但看不见背景"）。
+      if (!context.mounted) return;
+      try {
+        await precacheImage(
+          FileImage(target),
+          context,
+          onError: (Object e, StackTrace? st) => throw e,
+        );
+      } catch (e) {
+        try {
+          target.deleteSync();
+        } catch (_) {}
+        messenger.showSnackBar(SnackBar(
+          content: Text('图片解码失败，请换一张图片（$e）'),
+        ));
+        return;
+      }
       await state.setBackground(target.path);
       messenger.showSnackBar(
           const SnackBar(content: Text('背景已更新，应用于除阅读器外的所有页面')));
@@ -571,6 +605,28 @@ class SettingsPage extends StatelessWidget {
                 hintText: '/storage/emulated/0/Download/JM-Flutter',
                 border: OutlineInputBorder(),
                 isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            // 系统文件夹选择器（Android SAF / Windows 原生对话框），
+            // 选完自动回填路径，免手动输入。
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () async {
+                  try {
+                    final dir = await getDirectoryPath(
+                      confirmButtonText: '选择此文件夹',
+                    );
+                    if (dir != null && c.mounted) {
+                      ctrl.text = dir;
+                    }
+                  } catch (_) {
+                    // 当前平台不支持目录选择时静默（可手动输入）
+                  }
+                },
+                icon: const Icon(Icons.folder_open_rounded, size: 18),
+                label: const Text('选择文件夹…'),
               ),
             ),
           ],

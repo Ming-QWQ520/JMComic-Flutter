@@ -144,12 +144,21 @@ class WidgetBridge {
     }
   }
 
-  /// 把当前登录用户名同步到桌面小组件（登录/退出时调用）。
-  Future<void> writeUserName(String? name) async {
+  /// 把用户信息卡同步到桌面小组件（名称/收藏/J币/经验）。
+  /// 登录、退出、进入 APP、资料刷新时调用。
+  Future<void> writeUserCard({
+    String? name,
+    String favorites = '-',
+    String coin = '-',
+    String exp = '-',
+  }) async {
     if (!Platform.isAndroid) return;
     try {
-      await _channel.invokeMethod<bool>('writeUserName', <String, dynamic>{
+      await _channel.invokeMethod<bool>('writeUserCard', <String, dynamic>{
         'name': name ?? '未登录',
+        'favorites': favorites,
+        'coin': coin,
+        'exp': exp,
       });
     } on PlatformException {
       // 静默失败：widget 不应阻塞主流程

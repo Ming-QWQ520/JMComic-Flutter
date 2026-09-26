@@ -124,10 +124,14 @@ class MainActivity : FlutterActivity() {
         ).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "writeUserName" -> {
+                    "writeUserCard" -> {
+                        // 用户信息卡：名称/收藏/J币/经验（widget 用户页展示）
                         val name = call.argument<String>("name")
-                        JmHomeWidgetProvider.writeUserName(
-                            this@MainActivity, name
+                        val fav = call.argument<String>("favorites") ?: "-"
+                        val coin = call.argument<String>("coin") ?: "-"
+                        val exp = call.argument<String>("exp") ?: "-"
+                        JmHomeWidgetProvider.writeUserCard(
+                            this@MainActivity, name, fav, coin, exp
                         )
                         result.success(true)
                     }
@@ -159,8 +163,9 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
-        // 启动后如果有 shortcut / widget 跳转 action，发送到 Flutter
-        pendingJmAction?.let { dispatchActionToFlutter(it, pendingAlbumId) }
+        // 注意：jm_action 的分发统一由 onCreate / onNewIntent 负责
+        // （configureFlutterEngine 在 super.onCreate 内触发，早于
+        // intent extra 的解析，在这里分发会读到 null 或造成重复分发）。
     }
 
     /// 把 shortcut / widget 跳转 action 通过 widget 通道同步到 Flutter。
@@ -204,14 +209,24 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // 解析 shortcut / widget 跳转 intent 的 extra
+        // 关键时序修复：super.onCreate() 内部就会触发 configureFlutterEngine
+        // （其中的 jm_action 分发此时读到的 pendingJmAction 还是 null），
+        // 因此必须先解析 intent extra，再调 super——冷启动快捷方式此前
+        // 从未分发成功，表现为"点快捷方式进首页"。
         intent?.let { i ->
             val a = i.getStringExtra("jm_action")
             if (a != null) {
                 pendingJmAction = a
                 pendingAlbumId = i.getStringExtra("album_id")
             }
+        }
+        super.onCreate(savedInstanceState)
+        // 冷启动分发（warm start 走 onNewIntent）。分发后立即清空，
+        // 避免 configureFlutterEngine 内的兜底分发造成重复跳转。
+        pendingJmAction?.let { a ->
+            dispatchActionToFlutter(a, pendingAlbumId)
+            pendingJmAction = null
+            pendingAlbumId = null
         }
     }
 
@@ -337,10 +352,12 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 标准系统方案（用户要求不用自研枚举/对话框）：
-        // 主意图 = SAF content:// 目录 URI（系统"文件管理"可直接定位），
-        // 交给标准 Intent.createChooser——列出系统与第三方文件管理器。
-        // SAF URI 构建失败时退回 file:// + resource/directory。
+        // 标准系统「打开建议」（用户要求：调系统打开方式，不直进文件页）：
+        // - 主意图 = SAF content:// 目录 URI（系统"文件管理"可直达）；
+        // - EXTRA_INITIAL_INTENTS 附带 file:// 各目录 MIME 变体
+        //   （MT 管理器等第三方注册的是 file://）。
+        // 两者合并保证选择器有多个候选——只有一个候选时部分系统会
+        // 跳过选择器直接打开，这正是此前"直接跳转至文件页面"的原因。
         val primary = Intent(Intent.ACTION_VIEW)
         try {
             toSafInitialUri(path)?.let { docId ->
@@ -353,19 +370,34 @@ class MainActivity : FlutterActivity() {
             }
         } catch (_: Exception) {
         }
-        if (primary.data == null) {
-            primary.setDataAndType(
-                Uri.fromFile(dir), "resource/directory"
-            )
+        val usingSaf = primary.data != null
+        if (!usingSaf) {
+            primary.setDataAndType(Uri.fromFile(dir), "resource/directory")
         }
         primary.addFlags(
             Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
         )
 
-        // 标准 chooser；ROM 丢弃候选时用户侧表现为仅少量选项，
-        // 但这是系统标准行为，各文件管理器按各自 intent-filter 出现。
+        val chooser: Intent = if (usingSaf) {
+            val extras = listOf("resource/directory", "resource/folder").map { mime ->
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(Uri.fromFile(dir), mime)
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                }
+            }
+            Intent.createChooser(primary, "打开文件夹").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
+            }
+        } else {
+            Intent.createChooser(primary, "打开文件夹")
+        }
+
         return try {
-            startActivity(Intent.createChooser(primary, "打开文件夹"))
+            startActivity(chooser)
             true
         } catch (_: Exception) {
             openSafFallback(path)
