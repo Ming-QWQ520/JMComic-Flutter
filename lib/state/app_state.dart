@@ -231,10 +231,24 @@ class AppState extends ChangeNotifier {
     // 定义；失败静默（GitHub 在部分网络下不可达，不影响使用）。
     _fetchRepoStars();
 
-    // 桌面小组件数据同步：登录态（如有）+ 随机推荐一次。
-    unawaited(WidgetBridge.instance
-        .writeUserName(isLogged ? _user!.username : '未登录'));
+    // 桌面小组件数据同步：用户信息卡（如有）+ 随机推荐一次。
+    _syncUserCard();
     unawaited(refreshWidgetRandomAlbum());
+  }
+
+  /// 把当前登录用户信息卡（名称/收藏/J币/经验）同步到桌面小组件。
+  void _syncUserCard() {
+    final u = _user;
+    if (u == null) {
+      unawaited(WidgetBridge.instance.writeUserCard(name: '未登录'));
+      return;
+    }
+    unawaited(WidgetBridge.instance.writeUserCard(
+      name: u.username,
+      favorites: '${u.albumFavorites}/${u.albumFavoritesMax}',
+      coin: '${u.coin}',
+      exp: '${u.exp}',
+    ));
   }
 
   /// 拉取 GitHub 仓库 Star 数（fire-and-forget，失败保留 null）。
@@ -410,8 +424,8 @@ class AppState extends ChangeNotifier {
     await _store.setString('jwt', user.jwtToken);
     await _store.setString('avs', user.s);
     await _store.setJson('user', user.toMap());
-    // 同步用户名到桌面小组件（widget 显示「用户名」或「未登录」）
-    unawaited(WidgetBridge.instance.writeUserName(user.username));
+    // 同步用户信息卡到桌面小组件（名称/收藏/J币/经验）
+    _syncUserCard();
   }
 
   /// 从服务端拉取最新用户信息并本地落盘（购买/签到后同步 J币等）。
@@ -432,6 +446,8 @@ class AppState extends ChangeNotifier {
       _c.setAuth(merged.jwtToken, merged.s);
       notifyListeners();
       await _store.setJson('user', merged.toMap());
+      // J币/经验/收藏可能变化：同步用户信息卡到桌面小组件
+      _syncUserCard();
     } catch (_) {}
   }
 
@@ -443,7 +459,7 @@ class AppState extends ChangeNotifier {
     await _store.remove('avs');
     await _store.remove('user');
     // 同步退出状态到桌面小组件
-    unawaited(WidgetBridge.instance.writeUserName('未登录'));
+    _syncUserCard();
   }
 
   /// 拉取一批随机推荐并写入桌面小组件（多页轮播：封面/名称/JM号）。

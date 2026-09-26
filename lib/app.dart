@@ -252,28 +252,17 @@ class SlideRightRoute<T> extends PageRoute<T> {
       begin: const Offset(1.0, 0),
       end: Offset.zero,
     ).animate(curved);
-    // 前一页：进入新页时向左轻微缩进；退出新页时回弹。
-    final secOffset = Tween<Offset>(
-      begin: Offset.zero,
-      end: const Offset(-0.3, 0),
-    ).animate(
-      CurvedAnimation(
-        parent: secondaryAnimation,
-        curve: Curves.easeOutCubic,
-        reverseCurve: Curves.easeInCubic,
-      ),
-    );
+    // 关键修复：不再对「下一页」（secondaryAnimation）做左移位移——
+    // 自定义背景模式下两页之间会露出背景层，表现为切换时闪一下。
+    // 上一页保持原位，新页从右侧滑入盖住即可。
     return SlideTransition(
-      position: secOffset,
-      child: SlideTransition(
-        position: inOffset,
-        child: FadeTransition(
-          opacity: CurvedAnimation(
-            parent: animation,
-            curve: const Interval(0.2, 1.0, curve: Curves.easeOut),
-          ),
-          child: child,
+      position: inOffset,
+      child: FadeTransition(
+        opacity: CurvedAnimation(
+          parent: animation,
+          curve: const Interval(0.0, 0.55, curve: Curves.easeOut),
         ),
+        child: child,
       ),
     );
   }

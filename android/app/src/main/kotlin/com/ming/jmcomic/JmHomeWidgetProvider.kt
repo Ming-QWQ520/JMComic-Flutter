@@ -47,14 +47,20 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        val ids = intent.getIntArrayExtra(EXTRA_APPWIDGET_IDS)
+        // ids 为空/缺省时作用于全部 widget（用户页点击翻页即此形态）
         val mgr = AppWidgetManager.getInstance(context)
+        val allIds = mgr.getAppWidgetIds(
+            ComponentName(context, JmHomeWidgetProvider::class.java)
+        )
+        val ids = intent.getIntArrayExtra(EXTRA_APPWIDGET_IDS)?.takeIf {
+            it.isNotEmpty()
+        } ?: allIds
         when (intent.action) {
             ACTION_NEXT_PAGE -> {
-                if (ids != null) for (id in ids) flipPage(context, mgr, id, +1)
+                for (id in ids) flipPage(context, mgr, id, +1)
             }
             ACTION_PREV_PAGE -> {
-                if (ids != null) for (id in ids) flipPage(context, mgr, id, -1)
+                for (id in ids) flipPage(context, mgr, id, -1)
             }
             ACTION_OPEN_RANDOM -> {
                 val albumId = intent.getStringExtra(EXTRA_ALBUM_ID)
@@ -160,16 +166,24 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    /// 用户页（头像 + 用户名 + 提示，整页点击拉起 APP）
+    /// 用户页（名称 + 收藏/J币/经验；整页点击翻到随机推荐页——
+    /// RemoteViews 不支持手势，用「点击翻页」代替左右滑动）
     private fun fillUserPage(views: RemoteViews, context: Context) {
-        val name = prefs(context).getString(KEY_USER_NAME, "未登录") ?: "未登录"
+        val p = prefs(context)
+        val name = p.getString(KEY_USER_NAME, "未登录") ?: "未登录"
+        val fav = p.getString(KEY_USER_FAV, null) ?: "-"
+        val coin = p.getString(KEY_USER_COIN, null) ?: "-"
+        val exp = p.getString(KEY_USER_EXP, null) ?: "-"
         views.setTextViewText(R.id.userName, name)
+        views.setTextViewText(R.id.userStats, "收藏 $fav · J币 $coin · 经验 $exp")
         views.setTextViewText(
             R.id.userSubtitle,
-            if (name == "未登录") "点击登录 · ◀▶ 看随机推荐" else "点击打开 APP"
+            if (name == "未登录") "点击查看随机推荐 · 登录后显示数据" else "点击查看随机推荐"
         )
+        // 点击用户页 = 翻到下一页（代替滑动）
         views.setOnClickPendingIntent(
-            R.id.pageUser, buildOpenAppPendingIntent(context, "user")
+            R.id.pageUser,
+            buildActionPendingIntent(context, ACTION_NEXT_PAGE, IntArray(0))
         )
     }
 
@@ -218,11 +232,8 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     private fun updateAll(context: Context, mgr: AppWidgetManager) {
         val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
         for (id in mgr.getAppWidgetIds(comp)) {
-            val p = prefs(context)
-            val total = totalPages(readAlbums(p).length())
-            if (total > 0 && p.getInt(KEY_PAGE_INDEX + id, 0) >= total) {
-                p.edit().putInt(KEY_PAGE_INDEX + id, 0).apply()
-            }
+            // 刷新数据后回到默认的用户信息页
+            prefs(context).edit().putInt(KEY_PAGE_INDEX + id, 0).apply()
             updateWidget(context, mgr, id)
         }
     }
@@ -355,6 +366,9 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     companion object {
         const val PREFS_NAME = "jm_widget_prefs"
         const val KEY_USER_NAME = "user_name"
+        const val KEY_USER_FAV = "user_fav"
+        const val KEY_USER_COIN = "user_coin"
+        const val KEY_USER_EXP = "user_exp"
         const val KEY_PAGE_INDEX = "page_index_"
         const val KEY_RANDOM_ALBUMS = "random_albums"
 
@@ -418,10 +432,20 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         /// 页面总数 = 用户页(1) + 随机推荐数
         private fun totalPages(albumCount: Int): Int = albumCount + 1
 
-        /// 供 Flutter 端调用：写入用户名（用户页展示）
-        fun writeUserName(context: Context, name: String?) {
+        /// 供 Flutter 端调用：写入用户信息卡（名称/收藏/J币/经验）
+        fun writeUserCard(
+            context: Context,
+            name: String?,
+            favorites: String,
+            coin: String,
+            exp: String,
+        ) {
             prefs(context).edit()
-                .putString(KEY_USER_NAME, name ?: "未登录").apply()
+                .putString(KEY_USER_NAME, name ?: "未登录")
+                .putString(KEY_USER_FAV, favorites)
+                .putString(KEY_USER_COIN, coin)
+                .putString(KEY_USER_EXP, exp)
+                .apply()
             // 重绘以刷新用户页文案
             val mgr = AppWidgetManager.getInstance(context)
             val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
@@ -433,18 +457,16 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             }
         }
 
-        /// 供 Flutter 端调用：写入一批随机推荐（JSON 持久化 + 全量重绘）
+        /// 供 Flutter 端调用：写入一批随机推荐（JSON 持久化 + 全量重绘）。
+        /// 刷新后回到默认的用户信息页。
         fun writeRandomAlbums(context: Context, albums: List<Map<String, Any>>) {
             saveAlbums(context, albums)
-            // 页码收敛 + 通知所有 widget 重绘
+            // 页码收敛（刷新后回到用户页）+ 通知所有 widget 重绘
             val mgr = AppWidgetManager.getInstance(context)
             val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
             for (id in mgr.getAppWidgetIds(comp)) {
-                val p = prefs(context)
-                val total = totalPages(albums.size)
-                if (p.getInt(KEY_PAGE_INDEX + id, 0) >= total) {
-                    p.edit().putInt(KEY_PAGE_INDEX + id, 0).apply()
-                }
+                prefs(context).edit()
+                    .putInt(KEY_PAGE_INDEX + id, 0).apply()
                 JmHomeWidgetProvider().updateWidget(context, mgr, id)
             }
         }
