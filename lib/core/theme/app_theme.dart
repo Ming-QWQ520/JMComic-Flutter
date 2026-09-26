@@ -75,7 +75,10 @@ class AppTheme {
       ),
       cardTheme: CardThemeData(
         elevation: 0,
-        color: c.surface,
+        // 关键修复：原来写 c.surface 绕过了上面的 cardOpacity 处理，
+        // 导致「选项透明度」滑杆调节完全无可见变化。改为用已 alpha
+        // 处理过的 surface 变量，Card 背景才会随滑杆变透。
+        color: surface,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
@@ -88,7 +91,8 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 68,
         elevation: 0,
-        backgroundColor: transparent ? Colors.transparent : c.surface,
+        // 同上：用 surface（已应用 cardOpacity alpha）而非 c.surface。
+        backgroundColor: transparent ? Colors.transparent : surface,
         indicatorColor: c.primary.withValues(alpha: 0.16),
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         iconTheme: WidgetStateProperty.resolveWith((states) {
@@ -117,7 +121,8 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: c.surface,
+        // 同上：输入框填充色也走 surface，让选项透明度生效。
+        fillColor: surface,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(Dims.radiusM),
           borderSide: BorderSide(
