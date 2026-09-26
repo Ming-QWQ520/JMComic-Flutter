@@ -72,7 +72,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
                     }
                 }.start()
             }
-            Intent.ACTION_APPWIDGET_UPDATE -> {
+            AppWidgetManager.ACTION_APPWIDGET_UPDATE -> {
                 // 系统周期更新（30 分钟）：顺手原生刷新一次随机推荐
                 val pending = goAsync()
                 Thread {
@@ -85,9 +85,6 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             }
         }
     }
-
-    /// 页面总数 = 用户页(1) + 随机推荐数
-    private fun totalPages(albumCount: Int): Int = albumCount + 1
 
     /// 渲染 widget：用户页 + 每部随机推荐一页，动态 addView 进 ViewFlipper。
     private fun updateWidget(
@@ -131,7 +128,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             val album = albums.optJSONObject(index - 1)
             val id = album?.optString("id", "") ?: ""
             val coverUrl = album?.optString("coverUrl", "") ?: ""
-            if (id.isNotEmpty) {
+            if (id.isNotEmpty()) {
                 val cacheKey = coverUrl.ifEmpty { id }
                 if (coverCache.get(cacheKey) == null) {
                     downloadAndSetCover(context, mgr, widgetId, id, coverUrl, index)
@@ -216,30 +213,9 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     }
 
     // ------------------------------------------------------------------
-    // 工具
+    // 工具（prefs / readAlbums / saveAlbums / totalPages 定义在 companion，
+    // 实例方法与静态入口共用；companion 内不可访问实例私有成员）
     // ------------------------------------------------------------------
-
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    private fun readAlbums(prefs: SharedPreferences): JSONArray = try {
-        JSONArray(prefs.getString(KEY_RANDOM_ALBUMS, "[]") ?: "[]")
-    } catch (_: Exception) {
-        JSONArray()
-    }
-
-    private fun saveAlbums(context: Context, albums: List<Map<String, Any>>) {
-        val arr = JSONArray()
-        for (a in albums) {
-            arr.put(
-                JSONObject()
-                    .put("name", a["name"]?.toString() ?: "")
-                    .put("id", a["id"]?.toString() ?: "")
-                    .put("coverUrl", a["coverUrl"]?.toString() ?: "")
-            )
-        }
-        prefs(context).edit().putString(KEY_RANDOM_ALBUMS, arr.toString()).apply()
-    }
 
     private fun updateAll(context: Context, mgr: AppWidgetManager) {
         val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
@@ -399,6 +375,31 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             override fun sizeOf(key: String, value: Bitmap): Int = 1
         }
 
+        private fun prefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        private fun readAlbums(prefs: SharedPreferences): JSONArray = try {
+            JSONArray(prefs.getString(KEY_RANDOM_ALBUMS, "[]") ?: "[]")
+        } catch (_: Exception) {
+            JSONArray()
+        }
+
+        private fun saveAlbums(context: Context, albums: List<Map<String, Any>>) {
+            val arr = JSONArray()
+            for (a in albums) {
+                arr.put(
+                    JSONObject()
+                        .put("name", a["name"]?.toString() ?: "")
+                        .put("id", a["id"]?.toString() ?: "")
+                        .put("coverUrl", a["coverUrl"]?.toString() ?: "")
+                )
+            }
+            prefs(context).edit().putString(KEY_RANDOM_ALBUMS, arr.toString()).apply()
+        }
+
+        /// 页面总数 = 用户页(1) + 随机推荐数
+        private fun totalPages(albumCount: Int): Int = albumCount + 1
+
         /// 供 Flutter 端调用：写入用户名（用户页展示）
         fun writeUserName(context: Context, name: String?) {
             prefs(context).edit()
@@ -429,7 +430,5 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
                 JmHomeWidgetProvider().updateWidget(context, mgr, id)
             }
         }
-
-        private fun totalPages(albumCount: Int): Int = albumCount + 1
     }
 }
