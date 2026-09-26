@@ -33,11 +33,13 @@ import java.io.File
  * - 存储权限（下载目录 /storage/emulated/0/Download/JM-Flutter）：
  *   - Android 10 及以下：运行时申请 WRITE/READ_EXTERNAL_STORAGE；
  *   - Android 11+：跳转"所有文件访问"（MANAGE_EXTERNAL_STORAGE）系统设置页。
- * - 打开文件夹：点击"打开下载文件夹"时调用系统文件管理器
- *   （主意图为 SAF content:// 目录 URI + file:// 各 MIME 变体作为
- *   备选意图，一并交给系统选择器——系统"文件管理"与 MT 管理器等
- *   第三方文件管理器都会出现在打开方式中；全部失败时退回系统
- *   "下载"管理器）。
+ * - 打开文件夹：点击"打开下载文件夹"时弹出系统「打开建议」选择器。
+ *   Intent.createChooser 生成的 ACTION_CHOOSER 是显式拉起系统选择面板，
+ *   无论命中几个应用都必然弹出（不会被 ROM 静默改为直开）。主意图为
+ *   SAF content:// 目录 URI（系统"文件"注册的打开方式，可定位到目录），
+ *   file:// 各 MIME 变体经 EXTRA_ALTERNATE_INTENTS 并入同一面板
+ *   （MT 管理器等第三方注册的是 file://）；全部失败时退回 SAF 目录
+ *   选择器 / 系统"下载"管理器。
  * - openUrl：调起系统浏览器打开外部链接（B站/GitHub/抖音等）。
  * - shareText：调起系统分享面板（详情页分享按钮）。
  */
@@ -345,33 +347,83 @@ class MainActivity : FlutterActivity() {
         }
 
         // Android 7+ 默认 StrictMode 会拦截 file:// 跨进程暴露。
-        // 自定义 chooser 不再依赖 file:// 跨进程暴露（用 explicit launchIntent），
-        // 但仍保留放宽策略以兼容旧逻辑。
+        // 备选意图仍使用 file://，这里放宽检测避免抛异常。
         try {
             StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
         } catch (_: Exception) {
         }
 
-        // 标准系统「打开建议」（按验证过的方案：ACTION_GET_CONTENT +
-        // type=*/* + CATEGORY_OPENABLE——这是系统"文件"与 MT 管理器
-        // 等第三方文件管理器在 Manifest 里注册接收的 Intent；
-        // resource/folder / vnd.android.document/directory 在 Android 11+
-        // 基本没有第三方注册，会导致 MT 管理器不在列表中）。
-        // SHOW_ADVANCED 让 DocumentsUI 允许直接选目录。
-        val picker = Intent(Intent.ACTION_GET_CONTENT).apply {
-            type = "*/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
-            putExtra("android.content.extra.SHOW_ADVANCED", true)
+        // 百分百弹出系统「打开建议」的关键：用 Intent.createChooser
+        // （ACTION_CHOOSER）显式拉起系统选择面板——它无论解析出几个
+        // 应用都必然显示面板，系统不会静默直开。上一版用
+        // ACTION_GET_CONTENT + type=*/* 是"挑文件"语义，会被系统
+        // 文件选择器独占解析，表现为直接打开文件挑选页。
+        val fileUri = Uri.fromFile(dir)
+        val safDocUri: Uri? = try {
+            toSafInitialUri(path)?.let {
+                android.provider.DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents", it
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+
+        // 主意图：SAF content:// 目录 URI——系统"文件"注册的打开方式，
+        // 可直接定位到下载文件夹；构建失败时退回 file:// 变体。
+        val target = Intent(Intent.ACTION_VIEW).apply {
+            if (safDocUri != null) {
+                setDataAndType(
+                    safDocUri,
+                    android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+                )
+            } else {
+                setDataAndType(fileUri, "resource/directory")
+            }
             addFlags(
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                    Intent.FLAG_ACTIVITY_NEW_TASK
             )
         }
+
+        // 备选意图：file:// 各 MIME 变体——MT 管理器等第三方文件管理器
+        // 注册的是 file:// + resource/directory（或 resource/folder /
+        // vnd.android.document/directory）。EXTRA_ALTERNATE_INTENTS 让
+        // 选择器把主意图与备选意图的处理程序合并进同一份"系统建议"，
+        // 系统文件与 MT 管理器会同时出现在列表中。
+        val alternates = ArrayList<Intent>()
+        for (mime in listOf(
+            "resource/directory",
+            "resource/folder",
+            "vnd.android.document/directory"
+        )) {
+            if (safDocUri == null && mime == "resource/directory") {
+                continue // 已是主意图，避免面板重复
+            }
+            alternates.add(
+                Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(fileUri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            )
+        }
+
+        val chooser = Intent.createChooser(target, "打开文件夹").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(Intent.EXTRA_ALTERNATE_INTENTS, alternates.toTypedArray())
+        }
         return try {
-            startActivity(Intent.createChooser(picker, "打开文件夹"))
+            startActivity(chooser)
             true
         } catch (_: Exception) {
-            openSafFallback(path)
+            // 极端情况（无系统选择器）退回直开主意图，再失败走
+            // SAF 目录选择器 / 系统"下载"管理器兜底。
+            try {
+                startActivity(target)
+                true
+            } catch (_: Exception) {
+                openSafFallback(path)
+            }
         }
     }
 
