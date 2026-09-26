@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主组件（4x2）选择预览：模拟用户页外观 -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="14dp" />
+            <solid android:color="#E61F2A33" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:right="12dp" android:top="14dp">
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="#00000000" />
+                </shape>
+            </item>
+        </layer-list>
+    </item>
+    <item android:left="12dp" android:top="14dp" android:right="220dp" android:bottom="52dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="4dp" />
+            <solid android:color="#33FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:top="18dp" android:right="140dp" android:bottom="60dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#66FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:right="180dp" android:top="70dp" android:bottom="62dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#44FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="12dp" android:right="200dp" android:top="86dp" android:bottom="78dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#44FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

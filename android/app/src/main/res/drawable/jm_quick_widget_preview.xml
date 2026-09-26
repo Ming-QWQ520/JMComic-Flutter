@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 迷你组件（2x1）选择预览：封面 + 名称 + ⟳ -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <corners android:radius="14dp" />
+            <solid android:color="#E61F2A33" />
+        </shape>
+    </item>
+    <item android:left="10dp" android:top="10dp" android:right="190dp" android:bottom="10dp">
+        <shape android:shape="rectangle">
+            <corners android:radius="3dp" />
+            <solid android:color="#55FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="64dp" android:right="60dp" android:top="16dp" android:bottom="30dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#66FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="64dp" android:right="110dp" android:top="34dp" android:bottom="42dp">
+        <shape android:shape="rectangle">
+            <solid android:color="#44FFFFFF" />
+        </shape>
+    </item>
+    <item android:left="196dp" android:right="12dp" android:top="22dp" android:bottom="22dp">
+        <shape android:shape="oval">
+            <solid android:color="#66FFFFFF" />
+        </shape>
+    </item>
+</layer-list>

@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  桌面小组件布局：用户页 + 5 个随机推荐页（ViewFlipper 静态子页）。
+  桌面小组件布局：用户页 + 单部随机推荐页（ViewFlipper 静态子页）。
 
-  关键：RemoteViews 的动态 addView 在部分桌面/ROM 上渲染失败（白屏），
-  这里改用「XML 静态声明全部子页 + 运行时按 id 填充/隐藏」的兼容写法：
-  - 子页 1：用户页（头像 + 用户名，整页点击拉起 APP）；
-  - 子页 2..6：随机推荐漫画（封面 + 名称 + JM号，整页点击打开详情），
-    未用到的页由 Provider setViewVisibility(GONE) 隐藏；
-  - 左右翻页由底部 ◀ / ▶ 按钮触发（RemoteViews 不支持触摸手势，
-    横滑会被桌面自身拦截为换屏）；
-  - ⟳ 刷新由 Provider 原生拉取随机推荐并重绘，不进 APP。
+  机制（按需求）：
+  - ⟳ 点击一次 = 原生请求一部随机推荐并替换显示，再点一次继续请求
+    （不预取一批）；
+  - 用户页：名称 / 收藏 / J币 / 经验；点击用户页翻到随机推荐页；
+    随机推荐页：封面 + 名称 + JM号，点击打开对应详情，◀ 返回用户页；
+  - RemoteViews 不支持触摸手势（横滑会被桌面拦截换屏），
+    用点击翻页代替左右滑动；
+  - 封面按 albumId 磁盘缓存（widget 进程短命，内存缓存无效）。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -88,9 +88,9 @@
                     android:textSize="10sp" />
             </LinearLayout>
 
-            <!-- 子页 2..6：随机推荐漫画（id 唯一：pageComic1..5） -->
+            <!-- 子页 2：单部随机推荐漫画 -->
             <LinearLayout
-                android:id="@+id/pageComic1"
+                android:id="@+id/pageComic"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:orientation="horizontal"
@@ -98,7 +98,7 @@
                 android:padding="8dp">
 
                 <ImageView
-                    android:id="@+id/albumCover1"
+                    android:id="@+id/albumCover"
                     android:layout_width="62dp"
                     android:layout_height="86dp"
                     android:scaleType="centerCrop"
@@ -114,9 +114,10 @@
                     android:paddingEnd="4dp">
 
                     <TextView
-                        android:id="@+id/albumName1"
+                        android:id="@+id/albumName"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:text="随机推荐"
                         android:textColor="#FFFFFFFF"
                         android:textSize="14sp"
                         android:textStyle="bold"
@@ -124,208 +125,23 @@
                         android:ellipsize="end" />
 
                     <TextView
-                        android:id="@+id/albumJmId1"
+                        android:id="@+id/albumJmId"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:textColor="#FFFF8C42"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/pageComic2"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="8dp">
-
-                <ImageView
-                    android:id="@+id/albumCover2"
-                    android:layout_width="62dp"
-                    android:layout_height="86dp"
-                    android:scaleType="centerCrop"
-                    android:src="@mipmap/ic_launcher"
-                    android:contentDescription="漫画封面" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="4dp">
-
-                    <TextView
-                        android:id="@+id/albumName2"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="#FFFFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:maxLines="3"
-                        android:ellipsize="end" />
-
-                    <TextView
-                        android:id="@+id/albumJmId2"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="#FFFF8C42"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/pageComic3"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="8dp">
-
-                <ImageView
-                    android:id="@+id/albumCover3"
-                    android:layout_width="62dp"
-                    android:layout_height="86dp"
-                    android:scaleType="centerCrop"
-                    android:src="@mipmap/ic_launcher"
-                    android:contentDescription="漫画封面" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="4dp">
-
-                    <TextView
-                        android:id="@+id/albumName3"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="#FFFFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:maxLines="3"
-                        android:ellipsize="end" />
-
-                    <TextView
-                        android:id="@+id/albumJmId3"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="#FFFF8C42"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/pageComic4"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="8dp">
-
-                <ImageView
-                    android:id="@+id/albumCover4"
-                    android:layout_width="62dp"
-                    android:layout_height="86dp"
-                    android:scaleType="centerCrop"
-                    android:src="@mipmap/ic_launcher"
-                    android:contentDescription="漫画封面" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="4dp">
-
-                    <TextView
-                        android:id="@+id/albumName4"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="#FFFFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:maxLines="3"
-                        android:ellipsize="end" />
-
-                    <TextView
-                        android:id="@+id/albumJmId4"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:textColor="#FFFF8C42"
-                        android:textSize="12sp" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/pageComic5"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:orientation="horizontal"
-                android:gravity="center_vertical"
-                android:padding="8dp">
-
-                <ImageView
-                    android:id="@+id/albumCover5"
-                    android:layout_width="62dp"
-                    android:layout_height="86dp"
-                    android:scaleType="centerCrop"
-                    android:src="@mipmap/ic_launcher"
-                    android:contentDescription="漫画封面" />
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical"
-                    android:paddingStart="10dp"
-                    android:paddingEnd="4dp">
-
-                    <TextView
-                        android:id="@+id/albumName5"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="#FFFFFFFF"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:maxLines="3"
-                        android:ellipsize="end" />
-
-                    <TextView
-                        android:id="@+id/albumJmId5"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
+                        android:text="JM:"
                         android:textColor="#FFFF8C42"
                         android:textSize="12sp" />
                 </LinearLayout>
             </LinearLayout>
         </ViewFlipper>
 
-        <!-- 底部操作行：页码 + 左右翻页 + 刷新 -->
+        <!-- 底部操作行：返回用户页 + 页码 + 换一部随机推荐 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/pageIndex"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:paddingStart="10dp"
-                android:text="1/1"
-                android:textColor="#99FFFFFF"
-                android:textSize="10sp" />
 
             <ImageButton
                 android:id="@+id/btnPrev"
@@ -333,15 +149,17 @@
                 android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:src="@android:drawable/ic_media_previous"
-                android:contentDescription="上一页" />
+                android:contentDescription="返回用户页" />
 
-            <ImageButton
-                android:id="@+id/btnNext"
-                android:layout_width="34dp"
-                android:layout_height="30dp"
-                android:background="?android:attr/selectableItemBackground"
-                android:src="@android:drawable/ic_media_next"
-                android:contentDescription="下一页" />
+            <TextView
+                android:id="@+id/pageIndex"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:paddingStart="8dp"
+                android:text="1/2"
+                android:textColor="#99FFFFFF"
+                android:textSize="10sp" />
 
             <ImageButton
                 android:id="@+id/btnRefresh"
@@ -349,7 +167,7 @@
                 android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:src="@android:drawable/ic_popup_sync"
-                android:contentDescription="刷新随机推荐" />
+                android:contentDescription="换一部随机推荐" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

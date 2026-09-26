@@ -352,52 +352,23 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 标准系统「打开建议」（用户要求：调系统打开方式，不直进文件页）：
-        // - 主意图 = SAF content:// 目录 URI（系统"文件管理"可直达）；
-        // - EXTRA_INITIAL_INTENTS 附带 file:// 各目录 MIME 变体
-        //   （MT 管理器等第三方注册的是 file://）。
-        // 两者合并保证选择器有多个候选——只有一个候选时部分系统会
-        // 跳过选择器直接打开，这正是此前"直接跳转至文件页面"的原因。
-        val primary = Intent(Intent.ACTION_VIEW)
-        try {
-            toSafInitialUri(path)?.let { docId ->
-                primary.setDataAndType(
-                    android.provider.DocumentsContract.buildDocumentUri(
-                        "com.android.externalstorage.documents", docId
-                    ),
-                    android.provider.DocumentsContract.Document.MIME_TYPE_DIR
-                )
-            }
-        } catch (_: Exception) {
+        // 标准系统「打开建议」（按验证过的方案：ACTION_GET_CONTENT +
+        // type=*/* + CATEGORY_OPENABLE——这是系统"文件"与 MT 管理器
+        // 等第三方文件管理器在 Manifest 里注册接收的 Intent；
+        // resource/folder / vnd.android.document/directory 在 Android 11+
+        // 基本没有第三方注册，会导致 MT 管理器不在列表中）。
+        // SHOW_ADVANCED 让 DocumentsUI 允许直接选目录。
+        val picker = Intent(Intent.ACTION_GET_CONTENT).apply {
+            type = "*/*"
+            addCategory(Intent.CATEGORY_OPENABLE)
+            putExtra("android.content.extra.SHOW_ADVANCED", true)
+            addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
         }
-        val usingSaf = primary.data != null
-        if (!usingSaf) {
-            primary.setDataAndType(Uri.fromFile(dir), "resource/directory")
-        }
-        primary.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
-        )
-
-        val chooser: Intent = if (usingSaf) {
-            val extras = listOf("resource/directory", "resource/folder").map { mime ->
-                Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(Uri.fromFile(dir), mime)
-                    addFlags(
-                        Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    )
-                }
-            }
-            Intent.createChooser(primary, "打开文件夹").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
-            }
-        } else {
-            Intent.createChooser(primary, "打开文件夹")
-        }
-
         return try {
-            startActivity(chooser)
+            startActivity(Intent.createChooser(picker, "打开文件夹"))
             true
         } catch (_: Exception) {
             openSafFallback(path)

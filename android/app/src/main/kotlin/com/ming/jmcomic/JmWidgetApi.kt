@@ -1,7 +1,10 @@
 package com.ming.jmcomic
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -162,5 +165,91 @@ internal object JmWidgetApi {
         while (stream.read(buf).also { n = it } > 0) out.write(buf, 0, n)
         stream.close()
         return out.toString("UTF-8")
+    }
+
+    // ------------------------------------------------------------------
+    // 封面下载（磁盘缓存 + 多线路 + 重试）。
+    //
+    // widget 进程短命（每次更新都是新进程），内存缓存形同虚设——此前
+    // 每次渲染都要重新下载，网络稍有中断（SocketException / Incomplete
+    // image data）就显示不出封面。现在封面按 albumId 落盘到 cacheDir，
+    // 命中磁盘直接用，彻底解决"经常无法显示封面"。
+    // ------------------------------------------------------------------
+
+    private const val COVER_DIR = "widget_covers"
+
+    private fun coverFile(context: Context, albumId: String): File {
+        val dir = File(context.cacheDir, COVER_DIR)
+        if (!dir.exists()) dir.mkdirs()
+        return File(dir, "cover_$albumId.jpg")
+    }
+
+    /// 只读磁盘缓存的封面（不触发网络）；未命中返回 null。
+    fun peekCoverBitmap(context: Context, albumId: String): Bitmap? {
+        val f = coverFile(context, albumId)
+        if (!f.exists()) return null
+        return BitmapFactory.decodeFile(f.absolutePath)
+    }
+
+    /// 取封面 Bitmap：磁盘缓存优先，未命中走网络（多线路 × 2 次重试），
+    /// 成功后落盘。失败返回 null。
+    fun fetchCoverBitmap(context: Context, albumId: String, coverUrl: String): Bitmap? {
+        val f = coverFile(context, albumId)
+        if (f.exists()) {
+            val cached = BitmapFactory.decodeFile(f.absolutePath)
+            if (cached != null) return cached
+            f.delete() // 坏缓存清理
+        }
+        val urls = if (coverUrl.isNotEmpty()) {
+            listOf(coverUrl)
+        } else {
+            IMG_HOSTS.map { host ->
+                val h = if (host.endsWith('/')) host.dropLast(1) else host
+                "$h/media/albums/${albumId}_3x4.jpg"
+            }
+        }
+        for (u in urls) {
+            for (attempt in 0..1) {
+                var conn: HttpURLConnection? = null
+                try {
+                    conn = (URL(u).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 6000
+                        readTimeout = 12000
+                        setRequestProperty("User-Agent", UA)
+                        setRequestProperty("Accept", "image/*,*/*;q=0.8")
+                    }
+                    val raw = conn.inputStream.readBytes()
+                    if (raw.size < 64) continue // 截断响应（Incomplete image data）
+                    val bmp = BitmapFactory.decodeByteArray(raw, 0, raw.size)
+                    if (bmp != null) {
+                        val scaled = scaleBitmap(bmp, 86 * 2)
+                        try {
+                            f.outputStream().use { out ->
+                                scaled.compress(
+                                    Bitmap.CompressFormat.JPEG, 85, out
+                                )
+                            }
+                        } catch (_: Exception) {
+                        }
+                        return scaled
+                    }
+                } catch (_: Exception) {
+                    // 网络中断：同 URL 重试一次，再不行换下一线路
+                } finally {
+                    conn?.disconnect()
+                }
+            }
+        }
+        return null
+    }
+
+    private fun scaleBitmap(src: Bitmap, target: Int): Bitmap {
+        val w = src.width
+        val h = src.height
+        val ratio = if (w >= h) target.toFloat() / w else target.toFloat() / h
+        if (ratio >= 1f) return src
+        val nw = (w * ratio).toInt().coerceAtLeast(1)
+        val nh = (h * ratio).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(src, nw, nh, true)
     }
 }
