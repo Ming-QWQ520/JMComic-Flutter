@@ -47,11 +47,12 @@ class StorageService {
 
   /// 调用系统文件管理器打开文件夹。
   ///
-  /// Android：原生侧优先以 SAF content:// 目录 URI（系统"文件管理"可
-  /// 直接定位），并把 file:// 各 MIME 变体作为备选意图一并交给系统
-  /// 选择器（MT 管理器等第三方注册的是 file:// resource/directory），
-  /// 全部失败时退回系统"下载"管理器；返回 false 时由调用方提示路径
-  /// 文本兜底。Windows：直接调用 explorer.exe 定位到目录。
+  /// Android：Intent.createChooser 显式拉起系统「打开建议」面板——
+  /// 无论命中几个应用都必然弹出选择面板，不会被 ROM 静默直开；
+  /// 主意图为 SAF content:// 目录 URI（系统"文件"可直接定位），
+  /// file:// 各 MIME 变体经 EXTRA_ALTERNATE_INTENTS 并入同一面板
+  /// （MT 管理器等第三方注册的是 file://）；全部失败时退回 SAF 目录
+  /// 选择器。Windows：直接调用 explorer.exe 定位到目录。
   static Future<bool> openFolder(String path) async {
     if (path.isEmpty) return false;
     if (Platform.isWindows) {
