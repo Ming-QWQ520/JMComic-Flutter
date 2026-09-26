@@ -46,6 +46,11 @@ class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
     private var storageChannel: MethodChannel? = null
 
+    /// widget 通道引用：native → Flutter 的 jm_action / isAtRoot 必须
+    /// 发到 "com.ming.jmcomic/widget"（Flutter 端 WidgetBridge 在此通道
+    /// 上监听）。此前误用 volume 通道，widget 点击跳转/刷新永远无响应。
+    private var widgetChannel: MethodChannel? = null
+
     /// 双击退出：首次返回键弹 Toast 提示，2 秒内再按一次才真正退出。
     /// 用户反馈要求：增加滑动第二次才会退出 APP。
     private var lastBackPressTime: Long = 0
@@ -111,8 +116,9 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
-        // Widget bridge channel：Flutter 端向 widget 推送用户名 / 随机推荐
-        MethodChannel(
+        // Widget bridge channel：Flutter 端向 widget 推送用户名 / 随机推荐；
+        // 同时作为 native → Flutter 的 jm_action / isAtRoot 通道
+        widgetChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.ming.jmcomic/widget"
         ).apply {
@@ -157,18 +163,44 @@ class MainActivity : FlutterActivity() {
         pendingJmAction?.let { dispatchActionToFlutter(it, pendingAlbumId) }
     }
 
-    /// 把 shortcut / widget 跳转 action 通过 method channel 同步到 Flutter。
-    /// Flutter 端在 main.dart 监听该方法调用并导航到对应页面。
+    /// 把 shortcut / widget 跳转 action 通过 widget 通道同步到 Flutter。
+    /// Flutter 端 WidgetBridge 在 "com.ming.jmcomic/widget" 上监听 jm_action。
+    ///
+    /// 冷启动时 Dart 侧可能尚未注册处理器（invokeMethod 返回
+    /// notImplemented），带 3 次重试（400ms / 1200ms / 2400ms）。
     private fun dispatchActionToFlutter(action: String, albumId: String?) {
-        backPressHandler.post {
-            channel?.invokeMethod(
+        dispatchActionWithRetry(action, albumId, 0)
+    }
+
+    private fun dispatchActionWithRetry(action: String, albumId: String?, attempt: Int) {
+        val delay = when (attempt) {
+            0 -> 400L
+            1 -> 1200L
+            else -> 2400L
+        }
+        backPressHandler.postDelayed({
+            widgetChannel?.invokeMethod(
                 "jm_action",
                 mapOf(
                     "action" to action,
                     "albumId" to (albumId ?: "")
-                )
+                ),
+                object : MethodChannel.Result {
+                    override fun success(result: Any?) {}
+                    override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                        if (attempt < 2) {
+                            dispatchActionWithRetry(action, albumId, attempt + 1)
+                        }
+                    }
+
+                    override fun notImplemented() {
+                        if (attempt < 2) {
+                            dispatchActionWithRetry(action, albumId, attempt + 1)
+                        }
+                    }
+                }
             )
-        }
+        }, delay)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -199,8 +231,8 @@ class MainActivity : FlutterActivity() {
     /// 由 Flutter Navigator 处理，不进入此逻辑。
     override fun onBackPressed() {
         // 让 Flutter 优先处理（路由栈非空时由 Navigator pop）
-        // 这里通过 channel 询问 Flutter 是否在根路由
-        channel?.invokeMethod("isAtRoot", null, object : MethodChannel.Result {
+        // 这里通过 widget 通道询问 Flutter 是否在根路由
+        widgetChannel?.invokeMethod("isAtRoot", null, object : MethodChannel.Result {
             override fun success(result: Any?) {
                 val atRoot = (result as? Boolean) == true
                 if (atRoot) {
@@ -565,6 +597,7 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         channel = null
         storageChannel = null
+        widgetChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }
