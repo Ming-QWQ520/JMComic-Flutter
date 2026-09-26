@@ -40,6 +40,12 @@ class _ReaderPageState extends State<ReaderPage> {
   final ScrollController _listCtrl = ScrollController();
   final FocusNode _focus = FocusNode();
 
+  /// 双击放大使用的变换控制器：单击切换上下菜单，双击在 1x ↔ 2x 之间
+  /// 切换；双手指缩放由 InteractiveViewer 默认行为处理（maxScale=4）。
+  /// `_xCtrl` 由所有页面的 InteractiveViewer 共享，跨页切换时重置为 1x。
+  final TransformationController _xCtrl = TransformationController();
+  bool _doubleTapZoomed = false;
+
   String _albumId = '';
   String _chapterId = '';
   String _title = '';
@@ -84,6 +90,7 @@ class _ReaderPageState extends State<ReaderPage> {
     _pageCtrl.dispose();
     _listCtrl.dispose();
     _focus.dispose();
+    _xCtrl.dispose();
     _channel.setMethodCallHandler(null);
     // 离开阅读器：关闭常亮与音量键拦截
     _channel
@@ -328,6 +335,26 @@ class _ReaderPageState extends State<ReaderPage> {
     }
   }
 
+  /// 双击：在 1x 与 2x 之间切换缩放。单击仍由 _toggleBar 处理（弹/收
+  /// 上下菜单），双手指缩放由 InteractiveViewer 默认行为处理。
+  /// 切换时同步重置 _doubleTapZoomed 标志，避免状态错乱。
+  void _toggleDoubleTapZoom() {
+    setState(() {
+      _doubleTapZoomed = !_doubleTapZoomed;
+      // InteractiveViewer 默认 alignment=center，scale(2) 后图像中心
+      // 仍可见，用户可双指 / 单指拖动平移查看其它区域。
+      // 用 diagonal3Values 直接构造，避免 deprecated scale()。
+      _xCtrl.value = _doubleTapZoomed
+          ? Matrix4.diagonal3Values(2.0, 2.0, 2.0)
+          : Matrix4.identity();
+      // 放大时若顶/底栏可见，隐藏以最大化可视区域
+      if (_doubleTapZoomed && _barVisible) {
+        _barVisible = false;
+        _hideBarTimer?.cancel();
+      }
+    });
+  }
+
   void _scheduleHideBar() {
     _hideBarTimer?.cancel();
     if (_draggingSlider) return; // 拖动进度条期间绝不自动隐藏
@@ -490,7 +517,10 @@ class _ReaderPageState extends State<ReaderPage> {
               onKeyEvent: _onKey,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
+                // 单击：切换上下菜单；双击：在 1x ↔ 2x 之间切换缩放。
+                // 双手缩放（pinch-to-zoom）由 InteractiveViewer 默认行为处理。
                 onTap: _toggleBar,
+                onDoubleTap: _toggleDoubleTapZoom,
                 child: _buildContent(),
               ),
             ),
@@ -713,6 +743,7 @@ class _ReaderPageState extends State<ReaderPage> {
       );
     }
     return InteractiveViewer(
+      transformationController: _xCtrl,
       maxScale: 4,
       child: Center(
         child: Image.memory(
@@ -760,7 +791,10 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
-  /// 顶部弹窗：左侧漫画名称，右上角返回按键。
+  /// 顶部弹窗：左上角返回按键 + 漫画名称。
+  ///
+  /// 用户反馈要求：返回键从右上角移到左上角，符合通用阅读器习惯
+  /// （与系统返回手势位置一致）。
   ///
   /// 注意：本方法被 Stack 中 `Positioned(top/left/right)` 包裹
   /// （外层已带定位），这里绝不能再包一层 Positioned，否则
@@ -783,9 +817,19 @@ class _ReaderPageState extends State<ReaderPage> {
                 ],
               ),
             ),
-            padding: const EdgeInsets.fromLTRB(16, 4, 8, 12),
+            padding: const EdgeInsets.fromLTRB(8, 4, 16, 12),
             child: Row(
               children: <Widget>[
+                // 左上角返回按键
+                IconButton(
+                  tooltip: '返回',
+                  icon: const Icon(
+                    Icons.arrow_back_rounded,
+                    color: Colors.white,
+                  ),
+                  onPressed: () => Navigator.maybePop(context),
+                ),
+                const SizedBox(width: 4),
                 Expanded(
                   child: Text(
                     _title.isEmpty ? '阅读' : _title,
@@ -797,15 +841,6 @@ class _ReaderPageState extends State<ReaderPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-                // 右上角返回按键
-                IconButton(
-                  tooltip: '返回',
-                  icon: const Icon(
-                    Icons.arrow_back_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: () => Navigator.maybePop(context),
                 ),
               ],
             ),

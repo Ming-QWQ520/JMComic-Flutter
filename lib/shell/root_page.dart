@@ -44,11 +44,21 @@ class _RootPageState extends State<RootPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final hasBg = context.watch<AppState>().hasCustomBackground;
+    final appState = context.watch<AppState>();
+    final hasBg = appState.hasCustomBackground;
+    final cardOpacity = appState.cardOpacity;
     // 底部导航栏始终显示。此前"键盘弹起隐藏底栏"的 hack 依赖
     // MediaQuery.viewInsets，在部分机型（如 vivo edge-to-edge）上
     // 会残留幽灵 insets 导致底栏永久消失，表现为"底部导航栏无法
     // 正常显示"。键盘顶起的问题交由 Scaffold 默认行为处理即可。
+    // 关键修复：先前 NavigationBar 的 backgroundColor 直接覆盖为
+    // cs.surface（不应用户设置的 cardOpacity），导致底栏不随
+    // 「选项透明度」滑杆变化。改为应用 cardOpacity.alpha，与
+    // AppTheme 中 navigationBarTheme.backgroundColor 一致行为。
+    final navBarColor = (hasBg || cardOpacity < 1.0)
+        ? cs.surface
+            .withValues(alpha: hasBg ? 0.86 * cardOpacity : cardOpacity)
+        : cs.surface;
     return Scaffold(
       body: PageView(
         controller: _pageController,
@@ -76,10 +86,9 @@ class _RootPageState extends State<RootPage> {
         child: NavigationBar(
           selectedIndex: _index,
           onDestinationSelected: _switchTo,
-          // 自定义背景下底栏轻微透出背景图（保持可读性的半透明）。
-          backgroundColor:
-              hasBg ? cs.surface.withValues(alpha: 0.86) : cs.surface,
-          surfaceTintColor: cs.surface,
+          // 应用 cardOpacity，让底栏随「选项透明度」滑杆变透。
+          backgroundColor: navBarColor,
+          surfaceTintColor: navBarColor,
           shadowColor: Colors.transparent,
           destinations: const <Widget>[
             NavigationDestination(

@@ -240,11 +240,9 @@ class _SearchPageState extends State<SearchPage>
                 ),
             ],
           ),
-          IconButton(
-            tooltip: '搜索',
-            icon: const Icon(Icons.search_rounded),
-            onPressed: () => _search(),
-          ),
+          // 用户要求去除右上角独立的「搜索」按钮，仅保留筛选按钮
+          // (PopupMenuButton) 与左侧搜索框。搜索直接通过键盘回车提交，
+          // 或在搜索框右侧的 clear/submit 入口处理。
           const SizedBox(width: 4),
         ],
       ),

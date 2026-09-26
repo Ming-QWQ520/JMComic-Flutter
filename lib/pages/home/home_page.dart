@@ -78,13 +78,26 @@ class _HomePageState extends State<HomePage>
             expandedHeight: 96,
             collapsedHeight: 56,
             toolbarHeight: 56,
-            flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 20, bottom: 8),
-              centerTitle: false,
-              title: Text(
-                '发现',
-                style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-              ),
+            flexibleSpace: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints c) {
+                // FlexibleSpaceBar 在 expanded 状态下默认 title 偏下，
+                // 用户反馈「首页字样未对齐右侧按键区域」。这里手动按
+                // toolbarHeight=56 的中心垂直对齐 title，避免
+                // FlexibleSpaceBar 默认 padding 把 title 推到底部。
+                final progress = (c.biggest.height - 56) / (96 - 56);
+                final collapsed = (1.0 - progress).clamp(0.0, 1.0);
+                return FlexibleSpaceBar(
+                  titlePadding: EdgeInsets.only(
+                    left: 20,
+                    bottom: 12 + (1 - collapsed) * 8,
+                  ),
+                  centerTitle: false,
+                  title: Text(
+                    '发现',
+                    style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                );
+              },
             ),
             actions: <Widget>[
               IconButton(

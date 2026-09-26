@@ -26,6 +26,11 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
   final ScrollController _listCtrl = ScrollController();
   final Map<int, BuildContext> _itemCtx = <int, BuildContext>{};
 
+  /// 双击放大变换控制器：单击切菜单，双击 1x↔2x，双手指缩放由
+  /// InteractiveViewer 默认行为处理（maxScale=4）。
+  final TransformationController _xCtrl = TransformationController();
+  bool _doubleTapZoomed = false;
+
   List<String> _files = <String>[];
   String _title = '';
   int _currentPage = 0;
@@ -53,7 +58,21 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
     _hideBarTimer?.cancel();
     _pageCtrl.dispose();
     _listCtrl.dispose();
+    _xCtrl.dispose();
     super.dispose();
+  }
+
+  void _toggleDoubleTapZoom() {
+    setState(() {
+      _doubleTapZoomed = !_doubleTapZoomed;
+      _xCtrl.value = _doubleTapZoomed
+          ? Matrix4.diagonal3Values(2.0, 2.0, 2.0)
+          : Matrix4.identity();
+      if (_doubleTapZoomed && _barVisible) {
+        _barVisible = false;
+        _hideBarTimer?.cancel();
+      }
+    });
   }
 
   ReadDirection get _direction => context.read<AppState>().readDirection;
@@ -141,7 +160,10 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
+              // 单击切换上下菜单；双击切换 1x↔2x 缩放；双手指缩放由
+              // InteractiveViewer 默认行为处理。
               onTap: _toggleBar,
+              onDoubleTap: _toggleDoubleTapZoom,
               child: _buildContent(),
             ),
           ),
@@ -229,6 +251,7 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
       itemBuilder: (_, i) {
         final f = File(_files[i]);
         return InteractiveViewer(
+          transformationController: _xCtrl,
           maxScale: 4,
           child: Center(
             child: f.existsSync()
@@ -288,9 +311,17 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
               ],
             ),
           ),
-          padding: const EdgeInsets.fromLTRB(16, 4, 8, 12),
+          padding: const EdgeInsets.fromLTRB(8, 4, 16, 12),
           child: Row(
             children: <Widget>[
+              // 返回按键移到左上角，与在线阅读器一致
+              IconButton(
+                tooltip: '返回',
+                icon: const Icon(Icons.arrow_back_rounded,
+                    color: Colors.white),
+                onPressed: () => Navigator.maybePop(context),
+              ),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   _title,
@@ -302,12 +333,6 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
-              IconButton(
-                tooltip: '返回',
-                icon: const Icon(Icons.arrow_back_rounded,
-                    color: Colors.white),
-                onPressed: () => Navigator.maybePop(context),
               ),
             ],
           ),
