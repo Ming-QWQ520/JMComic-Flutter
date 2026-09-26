@@ -180,7 +180,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
             albumId: a.id.toString(),
             albumName: a.name,
             epsId: eps.id,
-            epsName: eps.name.isEmpty ? '第${eps.sort}话' : eps.name,
+            epsName: eps.displayTitle,
           );
         }
       }
@@ -261,7 +261,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
                         dense: true,
                         controlAffinity: ListTileControlAffinity.leading,
                         title: Text(
-                          s.name.isEmpty ? '第${s.sort}话' : s.name,
+                          s.displayTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -722,66 +722,68 @@ class _IntroTab extends StatelessWidget {
         key: const PageStorageKey<String>('intro-tab'),
         slivers: <Widget>[
           SliverOverlapInjector(handle: handle),
+          // ---------- 图标操作行（横向铺满全宽，不留左右留白） ----------
+          SliverToBoxAdapter(
+            child: Entrance(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
+                ),
+                child: Row(
+                  children: <Widget>[
+                    _IconAction(
+                      icon: album.liked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      iconColor: album.liked
+                          ? const Color(0xFFFF5A78)
+                          : cs.onSurfaceVariant,
+                      label: '${formatCount(album.totalLikes)}喜欢',
+                      onTap: onToggleLike,
+                    ),
+                    _IconAction(
+                      icon: Icons.chat_bubble_outline_rounded,
+                      label:
+                          '${album.commentTotal > 0 ? formatCount(album.commentTotal) : ''}评论',
+                      onTap: onOpenComments,
+                    ),
+                    _IconAction(
+                      icon: Icons.visibility_outlined,
+                      label: '${formatCount(album.totalViews)}观看',
+                    ),
+                    _IconAction(
+                      icon: album.isFavorite
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_border_rounded,
+                      iconColor:
+                          album.isFavorite ? cs.primary : cs.onSurfaceVariant,
+                      label: '收藏',
+                      onTap: onToggleFavorite,
+                    ),
+                    _IconAction(
+                      icon: Icons.download_outlined,
+                      label: '下载',
+                      onTap: onDownload,
+                    ),
+                    _IconAction(
+                      icon: Icons.notifications_none_rounded,
+                      label: '连载通知',
+                      onTap: () => ScaffoldMessenger.of(context)
+                          .showSnackBar(const SnackBar(
+                              content: Text('连载通知请在网页端设置'))),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
             sliver: SliverList.list(
               children: <Widget>[
-                // ---------- 图标操作行 ----------
-                Entrance(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    decoration: BoxDecoration(
-                      color: cs.surfaceContainerHighest.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        _IconAction(
-                          icon: album.liked
-                              ? Icons.favorite_rounded
-                              : Icons.favorite_border_rounded,
-                          iconColor: album.liked
-                              ? const Color(0xFFFF5A78)
-                              : cs.onSurfaceVariant,
-                          label: '${formatCount(album.totalLikes)}喜欢',
-                          onTap: onToggleLike,
-                        ),
-                        _IconAction(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          label:
-                              '${album.commentTotal > 0 ? formatCount(album.commentTotal) : ''}评论',
-                          onTap: onOpenComments,
-                        ),
-                        _IconAction(
-                          icon: Icons.visibility_outlined,
-                          label: '${formatCount(album.totalViews)}观看',
-                        ),
-                        _IconAction(
-                          icon: album.isFavorite
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_border_rounded,
-                          iconColor:
-                              album.isFavorite ? cs.primary : cs.onSurfaceVariant,
-                          label: '收藏',
-                          onTap: onToggleFavorite,
-                        ),
-                        _IconAction(
-                          icon: Icons.download_outlined,
-                          label: '下载',
-                          onTap: onDownload,
-                        ),
-                        _IconAction(
-                          icon: Icons.notifications_none_rounded,
-                          label: '连载通知',
-                          onTap: () => ScaffoldMessenger.of(context)
-                              .showSnackBar(const SnackBar(
-                                  content: Text('连载通知请在网页端设置'))),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 0),
                 // ---------- JM 号 ----------
                 Entrance(
                   delay: const Duration(milliseconds: 40),
@@ -1155,7 +1157,7 @@ class _CatalogTab extends StatelessWidget {
                           ),
                         ),
                         title: Text(
-                          s.name.isEmpty ? '第${s.sort}话' : s.name,
+                          s.displayTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1284,7 +1286,7 @@ class _ChapterGroupCardState extends State<_ChapterGroupCard> {
                         ),
                       ),
                       title: Text(
-                        s.name.isEmpty ? '第${s.sort}话' : s.name,
+                        s.displayTitle,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 13),

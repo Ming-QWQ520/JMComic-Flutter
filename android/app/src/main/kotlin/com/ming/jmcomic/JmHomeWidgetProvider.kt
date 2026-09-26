@@ -110,11 +110,34 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             buildActionPendingIntent(context, ACTION_REFRESH_RANDOM, ids)
         )
 
-        // 动态构建子页：用户页 + 漫画页
-        views.removeAllViews(R.id.flipper)
-        views.addView(R.id.flipper, buildUserPage(context))
-        for (album in albums.iterable()) {
-            views.addView(R.id.flipper, buildComicPage(context, widgetId, album))
+        // 动态填充静态子页：用户页（0）+ 漫画页 1..5（多余页 GONE）
+        fillUserPage(views, context)
+        for (i in 0 until COMIC_SLOTS) {
+            val slot = i + 1
+            if (i < albums.length()) {
+                val album = albums.optJSONObject(i) ?: continue
+                views.setViewVisibility(COMIC_PAGE_IDS[i], android.view.View.VISIBLE)
+                views.setTextViewText(
+                    COMIC_NAME_IDS[i], album.optString("name", "")
+                )
+                views.setTextViewText(
+                    COMIC_JMID_IDS[i], "JM: ${album.optString("id", "")}"
+                )
+                val coverUrl = album.optString("coverUrl", "")
+                val cacheKey = coverUrl.ifEmpty { album.optString("id", "") }
+                coverCache.get(cacheKey)?.let {
+                    views.setImageViewBitmap(COMIC_COVER_IDS[i], it)
+                }
+                views.setOnClickPendingIntent(
+                    COMIC_PAGE_IDS[i],
+                    buildActionPendingIntent(
+                        context, ACTION_OPEN_RANDOM, intArrayOf(widgetId),
+                        album.optString("id", "")
+                    )
+                )
+            } else {
+                views.setViewVisibility(COMIC_PAGE_IDS[i], android.view.View.GONE)
+            }
         }
 
         val index = prefs.getInt(KEY_PAGE_INDEX + widgetId, 0)
@@ -124,7 +147,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         mgr.updateAppWidget(widgetId, views)
 
         // 当前页是漫画页且封面未缓存时，后台下载（成功后重绘）
-        if (index >= 1) {
+        if (index >= 1 && index - 1 < albums.length()) {
             val album = albums.optJSONObject(index - 1)
             val id = album?.optString("id", "") ?: ""
             val coverUrl = album?.optString("coverUrl", "") ?: ""
@@ -138,41 +161,16 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     }
 
     /// 用户页（头像 + 用户名 + 提示，整页点击拉起 APP）
-    private fun buildUserPage(context: Context): RemoteViews {
-        val page = RemoteViews(context.packageName, R.layout.jm_widget_page_user)
-        val prefs = prefs(context)
-        val name = prefs.getString(KEY_USER_NAME, "未登录") ?: "未登录"
-        page.setTextViewText(R.id.userName, name)
-        page.setTextViewText(
+    private fun fillUserPage(views: RemoteViews, context: Context) {
+        val name = prefs(context).getString(KEY_USER_NAME, "未登录") ?: "未登录"
+        views.setTextViewText(R.id.userName, name)
+        views.setTextViewText(
             R.id.userSubtitle,
-            if (name == "未登录") "点击登录 · 左右箭头看随机推荐" else "点击打开 APP"
+            if (name == "未登录") "点击登录 · ◀▶ 看随机推荐" else "点击打开 APP"
         )
-        page.setOnClickPendingIntent(
-            R.id.pageRoot, buildOpenAppPendingIntent(context, "user")
+        views.setOnClickPendingIntent(
+            R.id.pageUser, buildOpenAppPendingIntent(context, "user")
         )
-        return page
-    }
-
-    /// 漫画页（封面 + 名称 + JM号，整页点击打开详情）
-    private fun buildComicPage(
-        context: Context,
-        widgetId: Int,
-        album: JSONObject,
-    ): RemoteViews {
-        val page = RemoteViews(context.packageName, R.layout.jm_widget_page)
-        page.setTextViewText(R.id.albumName, album.optString("name", ""))
-        page.setTextViewText(R.id.albumId, "JM: ${album.optString("id", "")}")
-        val coverUrl = album.optString("coverUrl", "")
-        val cacheKey = coverUrl.ifEmpty { album.optString("id", "") }
-        coverCache.get(cacheKey)?.let {
-            page.setImageViewBitmap(R.id.albumCover, it)
-        }
-        val open = buildActionPendingIntent(
-            context, ACTION_OPEN_RANDOM, intArrayOf(widgetId),
-            album.optString("id", "")
-        )
-        page.setOnClickPendingIntent(R.id.pageRoot, open)
-        return page
     }
 
     /// 左右翻页（delta = +1 / -1，环形：用户页 ↔ 各漫画页），持久化后重绘。
@@ -359,6 +357,26 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         const val KEY_USER_NAME = "user_name"
         const val KEY_PAGE_INDEX = "page_index_"
         const val KEY_RANDOM_ALBUMS = "random_albums"
+
+        /// 静态漫画页槽位数（jm_widget_layout.xml 中 pageComic1..5）
+        const val COMIC_SLOTS = 5
+
+        val COMIC_PAGE_IDS = intArrayOf(
+            R.id.pageComic1, R.id.pageComic2, R.id.pageComic3,
+            R.id.pageComic4, R.id.pageComic5,
+        )
+        val COMIC_COVER_IDS = intArrayOf(
+            R.id.albumCover1, R.id.albumCover2, R.id.albumCover3,
+            R.id.albumCover4, R.id.albumCover5,
+        )
+        val COMIC_NAME_IDS = intArrayOf(
+            R.id.albumName1, R.id.albumName2, R.id.albumName3,
+            R.id.albumName4, R.id.albumName5,
+        )
+        val COMIC_JMID_IDS = intArrayOf(
+            R.id.albumJmId1, R.id.albumJmId2, R.id.albumJmId3,
+            R.id.albumJmId4, R.id.albumJmId5,
+        )
 
         const val ACTION_NEXT_PAGE = "com.ming.jmcomic.widget.NEXT_PAGE"
         const val ACTION_PREV_PAGE = "com.ming.jmcomic.widget.PREV_PAGE"

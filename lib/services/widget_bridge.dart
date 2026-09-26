@@ -2,6 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show NavigatorState;
+
+import '../core/protocol/jm_api.dart';
 
 /// 桌面小组件 + 长按图标快捷菜单的数据桥（Android 原生 MethodChannel）。
 ///
@@ -50,6 +53,45 @@ class WidgetBridge {
     _handlers[action] = handler;
   }
 
+  // ---------- 冷启动路由队列 ----------
+  //
+  // Native 的 jm_action 在引擎启动后 ~400ms 就可能到达，而此时
+  // MaterialApp/Navigator 未必构建完成（currentState == null），
+  // 直接 pushNamed 会被静默吞掉——表现为"快捷方式进入首页"。
+  // 跳转请求先进队列，由 app.dart 每帧调用 flushPendingRoutes 冲刷。
+
+  final List<Map<String, Object?>> _pendingRoutes = <Map<String, Object?>>[];
+
+  /// 导航器未就绪时暂存跳转请求。
+  void enqueueRoute(String routeName, {Object? arguments}) {
+    _pendingRoutes.add(<String, Object?>{
+      'route': routeName,
+      'arguments': arguments,
+    });
+  }
+
+  /// 导航器就绪后冲刷队列（app.dart 每帧调用，队列为空时零开销）。
+  void flushPendingRoutes() {
+    if (_pendingRoutes.isEmpty) return;
+    final state = _navigatorReady?.call();
+    if (state == null) return;
+    for (final r in _pendingRoutes) {
+      state.pushNamed(
+        r['route']! as String,
+        arguments: r['arguments'],
+      );
+    }
+    _pendingRoutes.clear();
+  }
+
+  /// 由 configure 注入的"当前导航器状态"查询（可为 null = 未配置）。
+  NavigatorState? Function()? _navigatorReady;
+
+  /// configure 时注入导航器查询。
+  void setNavigatorReady(NavigatorState? Function() ready) {
+    _navigatorReady = ready;
+  }
+
   Future<dynamic> _handleMethodCall(MethodCall call) async {
     switch (call.method) {
       case 'jm_action':
@@ -80,6 +122,15 @@ class WidgetBridge {
       case 'random':
         if (albumId != null && albumId.isNotEmpty) {
           await _pushNamed?.call('/album', arguments: albumId);
+        } else {
+          // 快捷方式「随机推荐一部」不带 album_id（静态 XML 无法携带）：
+          // 现场拉取随机推荐并打开第一部。
+          try {
+            final list = await JmApi.instance.getRandomRecommend();
+            if (list.isNotEmpty) {
+              await _pushNamed?.call('/album', arguments: list.first.id);
+            }
+          } catch (_) {}
         }
         break;
       case 'weekly':

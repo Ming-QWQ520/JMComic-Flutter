@@ -19,6 +19,40 @@ enum ReadDirection { vertical, horizontal, rightToLeft }
 /// 全局应用状态：主题 / 阅读设置 / 登录态 / 线路与 DoH / 搜索历史。
 class AppState extends ChangeNotifier {
   AppState() {
+    // 同步预载全部个性化设置（main() 已在 runApp 前 warmUp SharedPreferences，
+    // 同步读取直接命中缓存）——保证首帧就是保存的主题/背景/透明度，
+    // 而不是"先默认样式、init 完成后再跳变"。
+    _scheme = ThemeScheme.fromKey(
+      _store.getStringSync('theme_scheme', 'light_orange'),
+    );
+    _volumeKeyPaging = _store.getBoolSync('volume_key_paging', true);
+    _readDirection = switch (_store.getStringSync('read_direction', 'vertical')) {
+      'horizontal' => ReadDirection.horizontal,
+      'rightToLeft' => ReadDirection.rightToLeft,
+      _ => ReadDirection.vertical,
+    };
+    _keepScreenOn = _store.getBoolSync('keep_screen_on', true);
+    _preLoad = _store.getIntSync('pre_load', 5);
+    _express = _store.getBoolSync('express', false);
+    _lang = _store.getStringSync('lang', 'CN');
+    _apiIndex = _store.getIntSync('api_index', 1);
+    _imgIndex = _store.getIntSync('img_index', 1);
+    _enableDoh = _store.getBoolSync('enable_doh', false);
+    _dohIndex = _store.getIntSync('doh_index', 0);
+    _downloadDir = _store.getStringSync('download_dir', '');
+    DownloadManager.instance.customBasePath = _downloadDir;
+    _backgroundPath = _store.getStringSync('custom_background', '');
+    if (_backgroundPath.isNotEmpty && !File(_backgroundPath).existsSync()) {
+      // 背景图文件已被删除/清理：静默回落默认背景。
+      _backgroundPath = '';
+    }
+    _backgroundOpacity =
+        _store.getIntSync('background_opacity', 50) / 100.0;
+    if (_backgroundOpacity < 0) _backgroundOpacity = 0;
+    if (_backgroundOpacity > 1) _backgroundOpacity = 1;
+    _cardOpacity = _store.getIntSync('card_opacity', 100) / 100.0;
+    if (_cardOpacity < 0) _cardOpacity = 0;
+    if (_cardOpacity > 1) _cardOpacity = 1;
     // 桌面小组件「刷新」按钮 → 原生拉起 APP（jm_action=widget_refresh）
     // → WidgetBridge 分发 → 重新拉取一批随机推荐写回 widget。
     WidgetBridge.instance.registerAction(
