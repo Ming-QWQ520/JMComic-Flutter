@@ -13,8 +13,8 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="6dp"
-    android:background="#7A1F2A33">
+    android:padding="4dp"
+    android:background="@drawable/jm_widget_bg">
 
     <LinearLayout
         android:layout_width="match_parent"
