@@ -10,16 +10,21 @@ class AppTheme {
   ///
   /// [transparent] = 自定义背景图模式下，Scaffold / AppBar / 底栏
   /// 背景透明化，让全局背景图层透出（阅读器自行指定黑色背景不受影响）。
+  /// [cardOpacity] = 前景 UI 元素（Card / 底栏 / ListTile）背景色的
+  /// 透明度，0~1。1=完全不透明，<1 时 surface 色按比例变透，使全局
+  /// 自定义背景从前景卡片缝隙透出，对应设置页「选项透明度」。
   static ThemeData light(
           [ThemeScheme scheme = ThemeScheme.lightOrange,
-          bool transparent = false]) =>
-      _build(scheme, Brightness.light, transparent);
+          bool transparent = false,
+          double cardOpacity = 1.0]) =>
+      _build(scheme, Brightness.light, transparent, cardOpacity);
 
   /// 按方案构建深色主题。
   static ThemeData dark(
           [ThemeScheme scheme = ThemeScheme.darkOrange,
-          bool transparent = false]) =>
-      _build(scheme, Brightness.dark, transparent);
+          bool transparent = false,
+          double cardOpacity = 1.0]) =>
+      _build(scheme, Brightness.dark, transparent, cardOpacity);
 
   /// 按方案 + 亮度构建（方案亮度与请求亮度不一致时以方案亮度为主）。
   static ThemeData of(ThemeScheme scheme) =>
@@ -29,16 +34,22 @@ class AppTheme {
     ThemeScheme scheme,
     Brightness brightness, [
     bool transparent = false,
+    double cardOpacity = 1.0,
   ]) {
     final c = SchemeColors.of(scheme);
     final isDark = c.isDark;
+    // 选项透明度：用户在「设置 → 个性化 → 选项透明度」中调节，0~1。
+    // 直接作用于 surface 色的 alpha，影响 Card / NavigationBar / ListTile
+    // 等以 surface 为背景的前景组件；text/icon 颜色不受影响。
+    final co = cardOpacity.clamp(0.0, 1.0);
+    final surface = co >= 1.0 ? c.surface : c.surface.withValues(alpha: co);
     final ColorScheme colorScheme = ColorScheme.fromSeed(
       seedColor: c.primary,
       brightness: isDark ? Brightness.dark : Brightness.light,
     ).copyWith(
       primary: c.primary,
       secondary: c.primary,
-      surface: c.surface,
+      surface: surface,
     );
 
     final base = ThemeData(

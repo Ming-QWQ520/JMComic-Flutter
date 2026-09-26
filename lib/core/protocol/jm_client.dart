@@ -181,6 +181,15 @@ class JmClient {
   String _avs = '';
   bool _initialized = false;
 
+  /// /setting 接口拿到的 session cookies（对齐 jmcomic python ensure_have_cookies）。
+  /// 禁漫移动端 API 强制要求所有请求都携带这些 cookies，否则会被重定向
+  /// 到「禁漫娘」提示页或直接返回 401。空表示尚未拉取（首次请求前会
+  /// 通过 [_ensureCookies] 异步补齐）。
+  final Map<String, String> _sessionCookies = <String, String>{};
+
+  /// /setting 是否已尝试过（避免反复重试同一会话）。
+  bool _cookiesFetched = false;
+
   /// 登录态失效回调（服务端 401 时触发，供 UI 层同步清除用户状态）。
   void Function()? onAuthExpired;
 
@@ -193,6 +202,14 @@ class JmClient {
   void setAuth(String jwt, String avs) {
     _jwt = jwt;
     _avs = avs;
+  }
+
+  /// 合并响应中的 cookies 到 sessionCookies（登录等接口下发的额外 cookies）。
+  /// 对齐 jmcomic python：登录成功后 self['cookies'] = dict(resp.cookies)，
+  /// 把响应中的 session cookies 与 AVS 一并保留，供后续请求复用。
+  void mergeCookies(Map<String, String> cookies) {
+    if (cookies.isEmpty) return;
+    _sessionCookies.addAll(cookies);
   }
 
   /// 全部可用线路 [主机, 线路名]（远程 jm3_Server 配置）。
@@ -322,27 +339,44 @@ class JmClient {
 
   // ---------- 请求头 ----------
 
-  /// API 请求头（对齐 qt GetHeader）。
+  /// API 请求头（对齐 qt GetHeader + jmcomic python APP_HEADERS_TEMPLATE）。
   ///
   /// ⚠签名三元组 [t] 必须与响应解密使用的 ts 是同一个值：
   /// 服务端用请求头 tokenparam 中的 ts 派生 AES 密钥加密响应 data。
-  /// [auth] 为 false 时不携带登录态（对齐 qt LoginReq2 pop authorization：
-  /// 登录接口带过期 token 会被服务端拒绝）。
+  ///
+  /// 关键修复：禁漫移动端 API 强制要求所有请求都携带 cookies（对齐
+  /// jmcomic python jm_client_impl.after_init → ensure_have_cookies：
+  /// 启动期 GET /setting 拿到 session cookies，否则后续 /login 等接口
+  /// 会直接返回 401 或重定向到「禁漫娘」提示页）。
+  ///
+  /// [auth] 为 false 时仅去 Authorization（对齐 qt LoginReq2 pop
+  /// authorization：登录接口带过期 token 会被服务端拒绝），但 cookies
+  /// 仍然要发送——/setting 拿到的 session cookies 与登录态无关。
   Map<String, String> _apiHeaders(
     JmCryptoToken t, {
     String? contentType,
     bool auth = true,
   }) {
+    final cookie = _buildCookieHeader(auth: auth);
     return <String, String>{
       'tokenparam': t.tokenparam,
       'token': t.token,
       'accept-encoding': 'gzip',
       'version': JmCrypto.clientVersion,
       if (auth && _jwt.isNotEmpty) 'authorization': 'Bearer $_jwt',
-      if (auth && _avs.isNotEmpty) 'cookie': 'AVS=$_avs',
+      if (cookie.isNotEmpty) 'cookie': cookie,
       // null-aware 元素：contentType 为 null 时不产生该键
       'Content-Type': ?contentType,
     };
+  }
+
+  /// 构造 Cookie 请求头：合并 /setting 拿到的 session cookies 与登录态
+  /// AVS。登录态失效（auth=false）时仅发送 session cookies，不发送 AVS
+  /// （避免过期 AVS 在 login 请求上毒化服务端校验）。
+  String _buildCookieHeader({bool auth = true}) {
+    final m = <String, String>{..._sessionCookies};
+    if (auth && _avs.isNotEmpty) m['AVS'] = _avs;
+    return m.entries.map((e) => '${e.key}=${e.value}').join('; ');
   }
 
   /// 图片请求头（对齐 qt DownloadBookReq：仅 Accept-Encoding，
@@ -1041,10 +1075,34 @@ class JmClient {
     }
   }
 
-  /// 首次使用前确保已初始化。
+  /// 首次使用前确保已初始化 + 已取得 session cookies。
+  ///
+  /// 对齐 jmcomic python JmApiClient.after_init：初始化后立即调用
+  /// ensure_have_cookies，先 GET /setting 拿到 session cookies，再放行
+  /// 后续业务请求（含 /login）。失败不阻塞启动，由 _do 重试机制兜底。
   Future<void> _ensureReady() async {
     if (!_initialized) {
       await init(language: lang, doh: enableDoh);
+    }
+    await _ensureCookies();
+  }
+
+  /// 拉取 /setting 接口的 session cookies（一次性，会话级缓存）。
+  ///
+  /// 仅在首次调用且当前无 cookies 时执行；并发场景下用 _cookiesFetched
+  /// 标志位去重，避免重复请求 /setting。失败时静默（_sessionCookies 保持
+  /// 空，由 _buildCookieHeader 自然生成空 Cookie 头，与原始行为兼容）。
+  Future<void> _ensureCookies() async {
+    if (_cookiesFetched || _sessionCookies.isNotEmpty) return;
+    _cookiesFetched = true;
+    try {
+      final r = await get('setting', const <String, dynamic>{}, false, false);
+      if (r.cookies.isNotEmpty) {
+        _sessionCookies.addAll(r.cookies);
+      }
+    } catch (_) {
+      // /setting 失败不阻塞业务请求；后续若服务端因缺 cookie 返回 401，
+      // _do 的多线路重试会继续尝试，最坏情况是抛 401 给上层显示。
     }
   }
 

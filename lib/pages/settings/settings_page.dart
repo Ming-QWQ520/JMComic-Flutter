@@ -363,6 +363,32 @@ class SettingsPage extends StatelessWidget {
                       },
                     ),
                   ],
+                  // 选项透明度：与背景透明度独立。控制前景 UI 元素
+                  // （卡片/底栏/列表项）的半透明程度。即使未设置自定义
+                  // 背景也可调（默认 100% 完全不透明）。
+                  ListTile(
+                    dense: true,
+                    leading: Icon(Icons.tune_rounded,
+                        size: 20, color: cs.primary),
+                    title: const Text('选项透明度'),
+                    subtitle: Text(
+                      '当前 ${(state.cardOpacity * 100).round()}%'
+                      '（数值越大，前景卡片/底栏越不透明）',
+                      style: tt.labelSmall,
+                    ),
+                    trailing: SizedBox(
+                      width: 130,
+                      child: Slider(
+                        min: 20,
+                        max: 100,
+                        divisions: 80,
+                        value:
+                            (state.cardOpacity * 100).round().toDouble(),
+                        onChanged: (double v) =>
+                            state.setCardOpacity(v / 100.0),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
