@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -27,6 +28,12 @@ class ImageStore {
   /// 内存缓存上限（条目数）。封面/头像均为小图，200 张 ≈ 10~20MB。
   static const int _memLimit = 200;
 
+  /// 磁盘缓存上限（字节，80MB）：超出后按文件修改时间从旧到新清理。
+  /// 长时间使用封面/头像缓存会持续增长，此上限控制磁盘占用。
+  static const int _diskLimit = 80 * 1024 * 1024;
+
+  bool _trimmed = false;
+
   final Map<String, Uint8List> _mem = <String, Uint8List>{};
   final List<String> _memOrder = <String>[];
   final Map<String, Future<Uint8List?>> _inflight =
@@ -46,7 +53,39 @@ class ImageStore {
     final d = Directory('${tmp.path}/jm_img');
     if (!d.existsSync()) d.createSync(recursive: true);
     _dir = d;
+    // 冷启动后异步清理一次超限的磁盘缓存（不阻塞加载）。
+    if (!_trimmed) {
+      _trimmed = true;
+      scheduleMicrotask(_trimDisk);
+    }
     return d;
+  }
+
+  /// 磁盘缓存超限时按修改时间从旧到新删除，直到回到上限的 70%。
+  Future<void> _trimDisk() async {
+    try {
+      final d = await _cacheDir();
+      final files = d
+          .listSync()
+          .whereType<File>()
+          .map((f) => (f, f.lastModifiedSync().millisecondsSinceEpoch))
+          .toList();
+      var total = 0;
+      for (final (f, _) in files) {
+        total += f.lengthSync();
+      }
+      if (total <= _diskLimit) return;
+      files.sort((a, b) => a.$2.compareTo(b.$2)); // 旧的在前
+      final target = (_diskLimit * 0.7).toInt();
+      for (final (f, _) in files) {
+        if (total <= target) break;
+        final len = f.lengthSync();
+        try {
+          f.deleteSync();
+          total -= len;
+        } catch (_) {}
+      }
+    } catch (_) {}
   }
 
   /// 加载图片字节；失败返回 null（调用方渲染占位/错误组件）。

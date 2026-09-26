@@ -462,21 +462,19 @@ class AppState extends ChangeNotifier {
     _syncUserCard();
   }
 
-  /// 拉取一批随机推荐并写入桌面小组件（多页轮播：封面/名称/JM号）。
-  ///
-  /// 触发时机：APP 冷启动 init()、widget 上点「刷新」（widget_refresh
-  /// 动作经原生 → WidgetBridge → 本方法，见构造函数注册）。
+  /// 拉取一部随机推荐并写入桌面小组件（冷启动预填；widget 上的 ⟳
+  /// 由原生直接请求，不经过这里）。
   Future<void> refreshWidgetRandomAlbum() async {
     try {
       final list = await api.getRandomRecommend();
       if (list.isEmpty) return;
+      final a = list.first;
       final albums = <Map<String, String>>[
-        for (final a in list.take(6))
-          <String, String>{
-            'name': a.name,
-            'id': a.id,
-            'coverUrl': api.coverUrl(a.id, updateAt: a.updateAt),
-          },
+        <String, String>{
+          'name': a.name,
+          'id': a.id,
+          'coverUrl': api.coverUrl(a.id, updateAt: a.updateAt),
+        },
       ];
       await WidgetBridge.instance.writeRandomAlbums(albums);
     } catch (_) {

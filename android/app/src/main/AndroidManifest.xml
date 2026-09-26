@@ -43,9 +43,10 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
-        <!-- 桌面小组件：用户页 / 随机推荐（左右滑动切换） -->
+        <!-- 桌面小组件：用户页 + 单部随机推荐（⟳ 原生换一部） -->
         <receiver
             android:name=".JmHomeWidgetProvider"
+            android:label="JM 漫画组件"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -53,6 +54,30 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/jm_widget_info" />
+        </receiver>
+        <!-- 迷你小组件（2x1）：单部随机推荐 -->
+        <receiver
+            android:name=".JmQuickWidgetProvider"
+            android:label="随机推荐（迷你）"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/jm_quick_widget_info" />
+        </receiver>
+        <!-- 迷你小组件（1x1）：快速随机入口 -->
+        <receiver
+            android:name=".JmOpenWidgetProvider"
+            android:label="随机一部"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/jm_open_widget_info" />
         </receiver>
         <meta-data
             android:name="flutterEmbedding"
@@ -84,6 +109,13 @@
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <data android:scheme="http"/>
+        </intent>
+        <!-- 打开下载文件夹（ACTION_GET_CONTENT + */*）：
+             MT 管理器等第三方文件管理器注册的是该 Intent，
+             resource/folder 等目录 MIME 在 Android 11+ 基本无第三方注册 -->
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT"/>
+            <data android:mimeType="*/*"/>
         </intent>
         <!-- 系统分享面板（详情页分享按钮） -->
         <intent>

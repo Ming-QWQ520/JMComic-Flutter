@@ -5,7 +5,7 @@
   - updatePeriodMillis 1800000（30 分钟，Android 最小允许值）
   - resizeMode 水平+垂直，允许用户调整
   - widgetLayout 指向 layout/jm_widget_layout.xml
-  - previewImage 用应用图标做预览
+  - previewImage 用 jm_widget_preview 形状预览
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="250dp"
@@ -13,7 +13,7 @@
     android:updatePeriodMillis="1800000"
     android:resizeMode="horizontal|vertical"
     android:initialLayout="@layout/jm_widget_layout"
-    android:previewImage="@mipmap/ic_launcher"
+    android:previewImage="@drawable/jm_widget_preview"
     android:targetCellWidth="4"
     android:targetCellHeight="2"
     android:widgetCategory="home_screen">

@@ -8,28 +8,25 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.os.Handler
 import android.os.Looper
-import android.util.LruCache
 import android.widget.RemoteViews
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
 
 /**
- * 桌面小组件：用户页 + 随机推荐轮播。
+ * 桌面小组件（4x2）：用户页 + 单部随机推荐。
  *
- * - 第 0 页 = 用户页（头像 + 用户名，点击拉起 APP）；
- *   第 1..N 页 = 随机推荐漫画（封面 + 名称 + JM号，点击打开详情）；
- * - 左右翻页：RemoteViews 不支持触摸手势（横滑会被桌面拦截为换屏），
- *   通过底部 ◀ / ▶ 按钮循环切换（ViewFlipper.setDisplayedChild）；
- * - 刷新：底部 ⟳ 按钮发广播（ACTION_REFRESH_RANDOM），由原生
- *   [JmWidgetApi] 直接拉取随机推荐并重绘——全程留在桌面，不进 APP；
+ * 机制（按需求）：
+ * - ⟳ 点击一次 = 原生请求一部随机推荐并替换显示，再点一次继续请求
+ *   （不预取一批，[JmWidgetApi.fetchRandomAlbums] limit=1）；
  *   系统每 30 分钟的 APPWIDGET_UPDATE 同样触发一次原生刷新；
- * - 封面 Bitmap 按 URL 做 LruCache，翻页回看不重复下载；
- *   多图片线路依次尝试；压缩到 widget 尺寸避免 binder 上限。
+ * - 第 0 页 = 用户页（名称/收藏/J币/经验，点击翻到随机推荐页）；
+ *   第 1 页 = 随机推荐（封面/名称/JM号，点击打开详情，◀ 返回用户页）；
+ * - RemoteViews 不支持触摸手势（横滑会被桌面拦截换屏），
+ *   用「点击用户页翻页」代替左右滑动；
+ * - 封面按 albumId 磁盘缓存（widget 进程短命，内存缓存无效），
+ *   网络中断自动重试，解决"经常无法显示封面"。
  */
 class JmHomeWidgetProvider : AppWidgetProvider() {
 
@@ -47,7 +44,6 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        // ids 为空/缺省时作用于全部 widget（用户页点击翻页即此形态）
         val mgr = AppWidgetManager.getInstance(context)
         val allIds = mgr.getAppWidgetIds(
             ComponentName(context, JmHomeWidgetProvider::class.java)
@@ -57,29 +53,20 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         } ?: allIds
         when (intent.action) {
             ACTION_NEXT_PAGE -> {
-                for (id in ids) flipPage(context, mgr, id, +1)
+                // 用户页 → 随机推荐页（点击用户页代替滑动）
+                for (id in ids) flipTo(context, mgr, id, 1)
             }
             ACTION_PREV_PAGE -> {
-                for (id in ids) flipPage(context, mgr, id, -1)
+                // ◀ 返回用户页
+                for (id in ids) flipTo(context, mgr, id, 0)
             }
             ACTION_OPEN_RANDOM -> {
                 val albumId = intent.getStringExtra(EXTRA_ALBUM_ID)
                 openAppWithAction(context, "random", albumId)
             }
-            ACTION_REFRESH_RANDOM -> {
-                // 桌面端直接刷新（不拉起 APP）：goAsync 保持进程存活
-                // 直到网络请求完成（广播返回后进程可能被回收）。
-                val pending = goAsync()
-                Thread {
-                    try {
-                        refreshRandomFromApi(context, mgr)
-                    } finally {
-                        pending.finish()
-                    }
-                }.start()
-            }
-            AppWidgetManager.ACTION_APPWIDGET_UPDATE -> {
-                // 系统周期更新（30 分钟）：顺手原生刷新一次随机推荐
+            ACTION_REFRESH_RANDOM, AppWidgetManager.ACTION_APPWIDGET_UPDATE -> {
+                // ⟳ / 系统周期更新：原生请求一部随机推荐（不进 APP）。
+                // goAsync 保持进程存活直到网络请求完成。
                 val pending = goAsync()
                 Thread {
                     try {
@@ -92,7 +79,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         }
     }
 
-    /// 渲染 widget：用户页 + 每部随机推荐一页，动态 addView 进 ViewFlipper。
+    /// 渲染 widget：填充用户页与随机推荐页（静态子页按 id 填充）。
     private fun updateWidget(
         context: Context,
         mgr: AppWidgetManager,
@@ -101,115 +88,98 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         val views = RemoteViews(context.packageName, R.layout.jm_widget_layout)
         val prefs = prefs(context)
         val albums = readAlbums(prefs)
-        val total = totalPages(albums.length())
+        val album = albums.optJSONObject(0)
 
-        // 底部操作行：左右翻页 + 刷新（桌面端原生拉取，不进 APP）
+        // 底部操作行：◀ 返回用户页 + 页码 + ⟳ 换一部
         val ids = intArrayOf(widgetId)
         views.setOnClickPendingIntent(
             R.id.btnPrev, buildActionPendingIntent(context, ACTION_PREV_PAGE, ids)
-        )
-        views.setOnClickPendingIntent(
-            R.id.btnNext, buildActionPendingIntent(context, ACTION_NEXT_PAGE, ids)
         )
         views.setOnClickPendingIntent(
             R.id.btnRefresh,
             buildActionPendingIntent(context, ACTION_REFRESH_RANDOM, ids)
         )
 
-        // 动态填充静态子页：用户页（0）+ 漫画页 1..5（多余页 GONE）
-        fillUserPage(views, context)
-        for (i in 0 until COMIC_SLOTS) {
-            val slot = i + 1
-            if (i < albums.length()) {
-                val album = albums.optJSONObject(i) ?: continue
-                views.setViewVisibility(COMIC_PAGE_IDS[i], android.view.View.VISIBLE)
-                views.setTextViewText(
-                    COMIC_NAME_IDS[i], album.optString("name", "")
-                )
-                views.setTextViewText(
-                    COMIC_JMID_IDS[i], "JM: ${album.optString("id", "")}"
-                )
-                val coverUrl = album.optString("coverUrl", "")
-                val cacheKey = coverUrl.ifEmpty { album.optString("id", "") }
-                coverCache.get(cacheKey)?.let {
-                    views.setImageViewBitmap(COMIC_COVER_IDS[i], it)
-                }
-                views.setOnClickPendingIntent(
-                    COMIC_PAGE_IDS[i],
-                    buildActionPendingIntent(
-                        context, ACTION_OPEN_RANDOM, intArrayOf(widgetId),
-                        album.optString("id", "")
-                    )
-                )
-            } else {
-                views.setViewVisibility(COMIC_PAGE_IDS[i], android.view.View.GONE)
-            }
-        }
-
-        val index = prefs.getInt(KEY_PAGE_INDEX + widgetId, 0)
-            .coerceIn(0, (total - 1).coerceAtLeast(0))
-        views.setTextViewText(R.id.pageIndex, "${index + 1}/$total")
-        views.setDisplayedChild(R.id.flipper, index)
-        mgr.updateAppWidget(widgetId, views)
-
-        // 当前页是漫画页且封面未缓存时，后台下载（成功后重绘）
-        if (index >= 1 && index - 1 < albums.length()) {
-            val album = albums.optJSONObject(index - 1)
-            val id = album?.optString("id", "") ?: ""
-            val coverUrl = album?.optString("coverUrl", "") ?: ""
-            if (id.isNotEmpty()) {
-                val cacheKey = coverUrl.ifEmpty { id }
-                if (coverCache.get(cacheKey) == null) {
-                    downloadAndSetCover(context, mgr, widgetId, id, coverUrl, index)
-                }
-            }
-        }
-    }
-
-    /// 用户页（名称 + 收藏/J币/经验；整页点击翻到随机推荐页——
-    /// RemoteViews 不支持手势，用「点击翻页」代替左右滑动）
-    private fun fillUserPage(views: RemoteViews, context: Context) {
-        val p = prefs(context)
-        val name = p.getString(KEY_USER_NAME, "未登录") ?: "未登录"
-        val fav = p.getString(KEY_USER_FAV, null) ?: "-"
-        val coin = p.getString(KEY_USER_COIN, null) ?: "-"
-        val exp = p.getString(KEY_USER_EXP, null) ?: "-"
+        // ---- 用户页（第 0 页）----
+        val name = prefs.getString(KEY_USER_NAME, "未登录") ?: "未登录"
+        val fav = prefs.getString(KEY_USER_FAV, null) ?: "-"
+        val coin = prefs.getString(KEY_USER_COIN, null) ?: "-"
+        val exp = prefs.getString(KEY_USER_EXP, null) ?: "-"
         views.setTextViewText(R.id.userName, name)
         views.setTextViewText(R.id.userStats, "收藏 $fav · J币 $coin · 经验 $exp")
         views.setTextViewText(
             R.id.userSubtitle,
             if (name == "未登录") "点击查看随机推荐 · 登录后显示数据" else "点击查看随机推荐"
         )
-        // 点击用户页 = 翻到下一页（代替滑动）
         views.setOnClickPendingIntent(
             R.id.pageUser,
             buildActionPendingIntent(context, ACTION_NEXT_PAGE, IntArray(0))
         )
+
+        // ---- 随机推荐页（第 1 页）----
+        if (album != null) {
+            val albumId = album.optString("id", "")
+            val coverUrl = album.optString("coverUrl", "")
+            views.setTextViewText(
+                R.id.albumName,
+                album.optString("name", "").ifEmpty { "随机推荐" }
+            )
+            views.setTextViewText(R.id.albumJmId, "JM: $albumId")
+            // 磁盘缓存命中直接给图，未命中后台下载（成功后重绘）
+            if (albumId.isNotEmpty) {
+                val bmp = JmWidgetApi.peekCoverBitmap(context, albumId)
+                if (bmp != null) {
+                    views.setImageViewBitmap(R.id.albumCover, bmp)
+                }
+            }
+            views.setOnClickPendingIntent(
+                R.id.pageComic,
+                buildActionPendingIntent(
+                    context, ACTION_OPEN_RANDOM, ids, albumId
+                )
+            )
+        } else {
+            views.setTextViewText(R.id.albumName, "暂无随机推荐")
+            views.setTextViewText(R.id.albumJmId, "点 ⟳ 换一部")
+        }
+
+        val index = prefs.getInt(KEY_PAGE_INDEX + widgetId, 0).coerceIn(0, 1)
+        views.setTextViewText(
+            R.id.pageIndex,
+            if (index == 0) "1/2 · 用户" else "2/2 · 随机推荐"
+        )
+        views.setDisplayedChild(R.id.flipper, index)
+        mgr.updateAppWidget(widgetId, views)
+
+        // 当前在随机推荐页且封面未命中磁盘缓存时，后台下载（成功后重绘）
+        if (index == 1 && album != null) {
+            val albumId = album.optString("id", "")
+            val coverUrl = album.optString("coverUrl", "")
+            if (albumId.isNotEmpty() &&
+                JmWidgetApi.peekCoverBitmap(context, albumId) == null
+            ) {
+                downloadAndSetCover(context, mgr, widgetId, albumId, coverUrl)
+            }
+        }
     }
 
-    /// 左右翻页（delta = +1 / -1，环形：用户页 ↔ 各漫画页），持久化后重绘。
-    private fun flipPage(
+    /// 翻到指定页（0=用户页，1=随机推荐页），持久化后重绘。
+    private fun flipTo(
         context: Context,
         mgr: AppWidgetManager,
         widgetId: Int,
-        delta: Int,
+        page: Int,
     ) {
-        val prefs = prefs(context)
-        val total = totalPages(readAlbums(prefs).length())
-        if (total <= 0) return
-        val cur = prefs.getInt(KEY_PAGE_INDEX + widgetId, 0)
-        val next = ((cur + delta) % total + total) % total
-        prefs.edit().putInt(KEY_PAGE_INDEX + widgetId, next).apply()
+        prefs(context).edit().putInt(KEY_PAGE_INDEX + widgetId, page).apply()
         updateWidget(context, mgr, widgetId)
     }
 
-    /// 原生拉取随机推荐（不进 APP）：成功则落盘 + 全量重绘。
+    /// 原生拉取一部随机推荐（不进 APP）：成功则落盘、翻到随机推荐页重绘。
     private fun refreshRandomFromApi(
         context: Context,
         mgr: AppWidgetManager,
     ) {
-        val fetched = JmWidgetApi.fetchRandomAlbums() ?: return
-        // 合并 coverUrl 字段（与 Flutter 端写入格式一致）
+        val fetched = JmWidgetApi.fetchRandomAlbums(limit = 1) ?: return
         val albums = ArrayList<Map<String, Any>>()
         for (o in fetched.iterable()) {
             albums.add(
@@ -220,22 +190,75 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
                 )
             )
         }
+        if (albums.isEmpty()) return
         saveAlbums(context, albums)
-        mainHandler.post { updateAll(context, mgr) }
+        mainHandler.post { updateAll(context, mgr, showComic = true) }
     }
 
     // ------------------------------------------------------------------
-    // 工具（prefs / readAlbums / saveAlbums / totalPages 定义在 companion，
+    // 工具（prefs / readAlbums / saveAlbums 定义在 companion，
     // 实例方法与静态入口共用；companion 内不可访问实例私有成员）
     // ------------------------------------------------------------------
 
-    private fun updateAll(context: Context, mgr: AppWidgetManager) {
+    private fun updateAll(
+        context: Context,
+        mgr: AppWidgetManager,
+        showComic: Boolean = false,
+    ) {
         val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
         for (id in mgr.getAppWidgetIds(comp)) {
-            // 刷新数据后回到默认的用户信息页
-            prefs(context).edit().putInt(KEY_PAGE_INDEX + id, 0).apply()
+            // 刷新后直接展示新的随机推荐（⟳ 的预期行为）
+            prefs(context).edit()
+                .putInt(KEY_PAGE_INDEX + id, if (showComic) 1 else 0).apply()
             updateWidget(context, mgr, id)
+            // 刷新后立即预取封面（磁盘缓存），避免先渲染占位
+            val album = readAlbums(prefs(context)).optJSONObject(0)
+            val albumId = album?.optString("id", "") ?: ""
+            if (albumId.isNotEmpty() &&
+                JmWidgetApi.peekCoverBitmap(context, albumId) == null
+            ) {
+                val widgetId = id
+                Thread {
+                    val bmp = JmWidgetApi.fetchCoverBitmap(
+                        context, albumId, album?.optString("coverUrl", "") ?: ""
+                    )
+                    if (bmp != null) {
+                        mainHandler.post {
+                            try {
+                                if (prefs(context)
+                                    .getInt(KEY_PAGE_INDEX + widgetId, 0) == 1
+                                ) {
+                                    updateWidget(context, mgr, widgetId)
+                                }
+                            } catch (_: Exception) {
+                            }
+                        }
+                    }
+                }.start()
+            }
         }
+    }
+
+    /// 后台下载封面（磁盘缓存），成功且仍停留在随机推荐页时重绘。
+    private fun downloadAndSetCover(
+        context: Context,
+        mgr: AppWidgetManager,
+        widgetId: Int,
+        albumId: String,
+        coverUrl: String,
+    ) {
+        Thread {
+            val bmp = JmWidgetApi.fetchCoverBitmap(context, albumId, coverUrl)
+                ?: return@Thread
+            mainHandler.post {
+                try {
+                    if (prefs(context).getInt(KEY_PAGE_INDEX + widgetId, 0) == 1) {
+                        updateWidget(context, mgr, widgetId)
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }.start()
     }
 
     /// JSONArray 便捷遍历
@@ -245,71 +268,6 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             optJSONObject(i)?.let { out.add(it) }
         }
         return out
-    }
-
-    /// 后台下载封面：无缓存 URL 时按 id 拼 {img}/media/albums/{id}_3x4.jpg，
-    /// 多图片线路依次尝试；成功后入缓存并重绘（仍停留在原页才更新）。
-    private fun downloadAndSetCover(
-        context: Context,
-        mgr: AppWidgetManager,
-        widgetId: Int,
-        albumId: String,
-        coverUrl: String,
-        index: Int,
-    ) {
-        Thread {
-            val bitmap = downloadCover(albumId, coverUrl) ?: return@Thread
-            val cacheKey = coverUrl.ifEmpty { albumId }
-            coverCache.put(cacheKey, bitmap)
-            mainHandler.post {
-                try {
-                    if (prefs(context).getInt(KEY_PAGE_INDEX + widgetId, 0) == index) {
-                        updateWidget(context, mgr, widgetId)
-                    }
-                } catch (_: Exception) {
-                }
-            }
-        }.start()
-    }
-
-    /// 下载封面 Bitmap（多线路回退），失败返回 null。
-    private fun downloadCover(albumId: String, coverUrl: String): Bitmap? {
-        val urls = if (coverUrl.isNotEmpty()) {
-            listOf(coverUrl)
-        } else {
-            JmWidgetApi.IMG_HOSTS.map { host ->
-                val h = if (host.endsWith('/')) host.dropLast(1) else host
-                "$h/media/albums/${albumId}_3x4.jpg"
-            }
-        }
-        for (u in urls) {
-            var conn: HttpURLConnection? = null
-            try {
-                conn = (URL(u).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 5000
-                    readTimeout = 8000
-                    setRequestProperty("User-Agent", "okhttp/3.12.0")
-                    setRequestProperty("Accept", "image/*,*/*;q=0.8")
-                }
-                val bmp = BitmapFactory.decodeStream(conn.inputStream)
-                if (bmp != null) return scaleForWidget(bmp, 86 * 2)
-            } catch (_: Exception) {
-            } finally {
-                conn?.disconnect()
-            }
-        }
-        return null
-    }
-
-    /// 把 Bitmap 缩小到适合 RemoteViews 显示的尺寸（避免 binder 上限）。
-    private fun scaleForWidget(src: Bitmap, target: Int): Bitmap {
-        val w = src.width
-        val h = src.height
-        val ratio = if (w >= h) target.toFloat() / w else target.toFloat() / h
-        if (ratio >= 1f) return src
-        val nw = (w * ratio).toInt().coerceAtLeast(1)
-        val nh = (h * ratio).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(src, nw, nh, true)
     }
 
     /// 构造拉起 APP 并带 jm_action extra 的 PendingIntent
@@ -338,7 +296,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     ): PendingIntent {
         val intent = Intent(context, JmHomeWidgetProvider::class.java).apply {
             this.action = action
-            putExtra(EXTRA_APPWIDGET_IDS, ids)
+            if (ids.isNotEmpty()) putExtra(EXTRA_APPWIDGET_IDS, ids)
             if (!albumId.isNullOrEmpty()) putExtra(EXTRA_ALBUM_ID, albumId)
         }
         return PendingIntent.getBroadcast(
@@ -372,40 +330,15 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         const val KEY_PAGE_INDEX = "page_index_"
         const val KEY_RANDOM_ALBUMS = "random_albums"
 
-        /// 静态漫画页槽位数（jm_widget_layout.xml 中 pageComic1..5）
-        const val COMIC_SLOTS = 5
-
-        val COMIC_PAGE_IDS = intArrayOf(
-            R.id.pageComic1, R.id.pageComic2, R.id.pageComic3,
-            R.id.pageComic4, R.id.pageComic5,
-        )
-        val COMIC_COVER_IDS = intArrayOf(
-            R.id.albumCover1, R.id.albumCover2, R.id.albumCover3,
-            R.id.albumCover4, R.id.albumCover5,
-        )
-        val COMIC_NAME_IDS = intArrayOf(
-            R.id.albumName1, R.id.albumName2, R.id.albumName3,
-            R.id.albumName4, R.id.albumName5,
-        )
-        val COMIC_JMID_IDS = intArrayOf(
-            R.id.albumJmId1, R.id.albumJmId2, R.id.albumJmId3,
-            R.id.albumJmId4, R.id.albumJmId5,
-        )
-
         const val ACTION_NEXT_PAGE = "com.ming.jmcomic.widget.NEXT_PAGE"
         const val ACTION_PREV_PAGE = "com.ming.jmcomic.widget.PREV_PAGE"
         const val ACTION_OPEN_RANDOM = "com.ming.jmcomic.widget.OPEN_RANDOM"
 
-        /// 刷新：原生拉取随机推荐（留在桌面，不进 APP）
+        /// 刷新：原生拉取一部随机推荐（留在桌面，不进 APP）
         const val ACTION_REFRESH_RANDOM = "com.ming.jmcomic.widget.REFRESH_RANDOM"
 
         const val EXTRA_APPWIDGET_IDS = "appwidget_ids"
         const val EXTRA_ALBUM_ID = "album_id"
-
-        /// 封面位图内存缓存（按条目数计；scaled 封面都很小）
-        private val coverCache = object : LruCache<String, Bitmap>(24) {
-            override fun sizeOf(key: String, value: Bitmap): Int = 1
-        }
 
         private fun prefs(context: Context): SharedPreferences =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -429,9 +362,6 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             prefs(context).edit().putString(KEY_RANDOM_ALBUMS, arr.toString()).apply()
         }
 
-        /// 页面总数 = 用户页(1) + 随机推荐数
-        private fun totalPages(albumCount: Int): Int = albumCount + 1
-
         /// 供 Flutter 端调用：写入用户信息卡（名称/收藏/J币/经验）
         fun writeUserCard(
             context: Context,
@@ -446,27 +376,21 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
                 .putString(KEY_USER_COIN, coin)
                 .putString(KEY_USER_EXP, exp)
                 .apply()
-            // 重绘以刷新用户页文案
-            val mgr = AppWidgetManager.getInstance(context)
-            val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
-            val p = prefs(context)
-            for (id in mgr.getAppWidgetIds(comp)) {
-                if (p.getInt(KEY_PAGE_INDEX + id, 0) == 0) {
-                    JmHomeWidgetProvider().updateWidget(context, mgr, id)
-                }
-            }
+            redraw(context)
         }
 
-        /// 供 Flutter 端调用：写入一批随机推荐（JSON 持久化 + 全量重绘）。
-        /// 刷新后回到默认的用户信息页。
+        /// 供 Flutter 端调用：写入一部随机推荐（冷启动预填）。
+        /// 只写数据不翻页（保持默认的用户页）。
         fun writeRandomAlbums(context: Context, albums: List<Map<String, Any>>) {
             saveAlbums(context, albums)
-            // 页码收敛（刷新后回到用户页）+ 通知所有 widget 重绘
+            redraw(context)
+        }
+
+        /// 重绘全部 widget（保持当前页码）。
+        private fun redraw(context: Context) {
             val mgr = AppWidgetManager.getInstance(context)
             val comp = ComponentName(context, JmHomeWidgetProvider::class.java)
             for (id in mgr.getAppWidgetIds(comp)) {
-                prefs(context).edit()
-                    .putInt(KEY_PAGE_INDEX + id, 0).apply()
                 JmHomeWidgetProvider().updateWidget(context, mgr, id)
             }
         }
