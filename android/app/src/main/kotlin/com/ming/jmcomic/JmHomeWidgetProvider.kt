@@ -177,17 +177,8 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
     }
 
     // ------------------------------------------------------------------
-    // 工具
+    // 工具（prefs / readAlbums 定义在 companion，实例与静态共用）
     // ------------------------------------------------------------------
-
-    private fun prefs(context: Context): SharedPreferences =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    private fun readAlbums(prefs: SharedPreferences): JSONArray = try {
-        JSONArray(prefs.getString(KEY_RANDOM_ALBUMS, "[]") ?: "[]")
-    } catch (_: Exception) {
-        JSONArray()
-    }
 
     /// JSONArray 便捷遍历
     private fun JSONArray.iterable(): List<JSONObject> {
@@ -297,6 +288,15 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
         /// 封面位图内存缓存（按条目数计；scaled 封面都很小）
         private val coverCache = object : LruCache<String, Bitmap>(24) {
             override fun sizeOf(key: String, value: Bitmap): Int = 1
+        }
+
+        private fun prefs(context: Context): SharedPreferences =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+        private fun readAlbums(prefs: SharedPreferences): JSONArray = try {
+            JSONArray(prefs.getString(KEY_RANDOM_ALBUMS, "[]") ?: "[]")
+        } catch (_: Exception) {
+            JSONArray()
         }
 
         /// 供 Flutter 端调用：写入用户名（保留通道兼容；当前布局不展示用户名）
