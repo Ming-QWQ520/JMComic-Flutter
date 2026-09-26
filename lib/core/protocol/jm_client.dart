@@ -19,7 +19,7 @@ class JmApiException implements Exception {
 
 /// HTTP 层错误（重试与线路切换耗尽后抛出）。
 class JmHttpException implements Exception {
-  JmHttpException(this.status, [this.body = '', this.cause]);
+  JmHttpException(this.status, [this.body = '', this.cause, this.apiMessage]);
 
   /// HTTP 状态码（0 表示网络错误）。
   final int status;
@@ -27,6 +27,12 @@ class JmHttpException implements Exception {
   /// 诊断信息：错误响应体片段 / 线路尝试记录。
   final String body;
   final Object? cause;
+
+  /// 从响应体中提取的服务端业务错误消息（如 `無效的用戶名和／或密碼`）。
+  /// 仅在 HTTP 4xx + JSON 响应含 `errorMsg`/`msg`/`message` 字段时填充，
+  /// 供上层 [_do] 在所有线路都返回同一业务错误时直接转 JmApiException
+  /// 抛出，让用户看到「用户名或密码错误」而非「网络错误」。
+  final String? apiMessage;
 
   @override
   String toString() {
@@ -627,6 +633,16 @@ class JmClient {
     var hint = '';
     final off = JmClock.offsetSeconds;
     if (off.abs() > 120) hint = '（设备时间与服务器相差约${off.abs()}秒，已自动校准）';
+    // 关键修复：若所有线路都返回同一业务错误（如 login 401 +
+    // 「無效的用戶名和／或密碼」），切线路无意义，直接转为
+    // JmApiException 抛出，让用户看到真实失败原因而非"网络错误"。
+    final lastHttp = lastCause;
+    if (lastHttp is JmHttpException) {
+      final apiMsg = lastHttp.apiMessage;
+      if (apiMsg != null && apiMsg.isNotEmpty) {
+        throw JmApiException(lastHttp.status, apiMsg);
+      }
+    }
     throw JmHttpException(0, '全部线路失败$hint [${tried.join(', ')}]', lastCause);
   }
 
@@ -656,12 +672,23 @@ class JmClient {
     } catch (_) {}
     if (resp.statusCode < 200 || resp.statusCode > 299) {
       final snippet = await _errorSnippet(resp);
-      throw JmHttpException(resp.statusCode, snippet);
+      // 关键修复：尝试从 JSON 响应体提取业务 errorMsg（如
+      // 「無效的用戶名和／或密碼」），让上层能直接展示真实原因
+      // 而非笼统的"网络错误"。login 401 这种业务错误不会被切线路
+      // 重试绕过——所有线路都返回同样的 errorMsg。
+      final apiMsg = _extractApiMessage(snippet);
+      throw JmHttpException(resp.statusCode, snippet, null, apiMsg);
     }
     return resp;
   }
 
   /// 读取错误响应的诊断片段（截断至 ~400 字符，附带 server / cf-ray 头）。
+  ///
+  /// 关键修复：服务端业务错误（如 login 401 + `errorMsg: "無效的用戶名和／或密碼"`）
+  /// 此前被当成"网络错误"全部线路失败抛出，用户看不到真正的失败原因。
+  /// 这里尝试解析 JSON 提取 `errorMsg` / `msg` / `message` 字段，作为
+  /// `JmHttpException.apiMessage` 携带，由上层 [_do] 在所有线路都返回
+  /// 同一业务错误时转为 `JmApiException` 抛出。
   Future<String> _errorSnippet(HttpClientResponse resp) async {
     final sb = StringBuffer();
     final srv = resp.headers.value('server');
@@ -684,6 +711,39 @@ class JmClient {
     } catch (_) {}
     final s = sb.toString().replaceAll(RegExp(r'\s+'), ' ').trim();
     return s.length <= 600 ? s : s.substring(0, 600);
+  }
+
+  /// 从响应诊断片段中提取 `errorMsg`/`msg`/`message` 字段值。
+  ///
+  /// 业务错误响应形如 `{"code":401,"data":[],"errorMsg":"無效的用戶名和／或密碼！"}`。
+  /// 提取后供 [_do] 在汇总错误时直接展示，避免被 "网络错误" 误导。
+  String? _extractApiMessage(String snippet) {
+    // 截取第一个 JSON 对象片段（响应可能含 [server=...] 前缀）
+    final start = snippet.indexOf('{');
+    if (start < 0) return null;
+    var depth = 0;
+    var end = -1;
+    for (var i = start; i < snippet.length; i++) {
+      final ch = snippet[i];
+      if (ch == '{') depth++;
+      if (ch == '}') {
+        depth--;
+        if (depth == 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end < 0) return null;
+    final jsonStr = snippet.substring(start, end + 1);
+    try {
+      final decoded = jsonDecode(jsonStr);
+      if (decoded is Map) {
+        final msg = decoded['errorMsg'] ?? decoded['msg'] ?? decoded['message'];
+        if (msg is String && msg.isNotEmpty) return msg;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// 截断字符串便于诊断展示。

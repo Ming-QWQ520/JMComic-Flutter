@@ -315,28 +315,40 @@ class SettingsPage extends StatelessWidget {
                     onTap: () => _pickBackground(context, state),
                   ),
                   // 自定义背景透明度（仅当设置了背景时显示）。
+                  // 滑杆布局重设计：去除提示副标题，滑杆放在名称下方
+                  // 占整行宽度，调节更顺手。
                   if (state.hasCustomBackground) ...<Widget>[
-                    ListTile(
-                      dense: true,
-                      leading: Icon(Icons.opacity_rounded,
-                          size: 20, color: cs.primary),
-                      title: const Text('背景透明度'),
-                      subtitle: Text(
-                        '当前 ${(state.backgroundOpacity * 100).round()}%'
-                        '（数值越大背景越透明）',
-                        style: tt.labelSmall,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(Icons.opacity_rounded,
+                              size: 20, color: cs.primary),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text('背景透明度',
+                                style: tt.titleSmall
+                                    ?.copyWith(fontWeight: FontWeight.w600)),
+                          ),
+                          Text(
+                            '${(state.backgroundOpacity * 100).round()}%',
+                            style: tt.labelMedium
+                                ?.copyWith(color: cs.primary),
+                          ),
+                        ],
                       ),
-                      trailing: SizedBox(
-                        width: 130,
-                        child: Slider(
-                          min: 0,
-                          max: 100,
-                          divisions: 100,
-                          value:
-                              (state.backgroundOpacity * 100).round().toDouble(),
-                          onChanged: (double v) =>
-                              state.setBackgroundOpacity(v / 100.0),
-                        ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 16, 4),
+                      child: Slider(
+                        min: 0,
+                        max: 100,
+                        divisions: 100,
+                        value: (state.backgroundOpacity * 100)
+                            .round()
+                            .toDouble(),
+                        onChanged: (double v) =>
+                            state.setBackgroundOpacity(v / 100.0),
                       ),
                     ),
                     ListTile(
@@ -353,8 +365,10 @@ class SettingsPage extends StatelessWidget {
                         // 解码结果。这里在恢复默认时直接删除残留文件，避免
                         // 下次设置时缓存命中。
                         try {
-                          final docs = await getApplicationDocumentsDirectory();
-                          final old = File('${docs.path}/custom_background.img');
+                          final docs =
+                              await getApplicationDocumentsDirectory();
+                          final old =
+                              File('${docs.path}/custom_background.img');
                           if (old.existsSync()) await old.delete();
                         } catch (_) {}
                         if (!context.mounted) return;
@@ -364,29 +378,37 @@ class SettingsPage extends StatelessWidget {
                     ),
                   ],
                   // 选项透明度：与背景透明度独立。控制前景 UI 元素
-                  // （卡片/底栏/列表项）的半透明程度。即使未设置自定义
-                  // 背景也可调（默认 100% 完全不透明）。
-                  ListTile(
-                    dense: true,
-                    leading: Icon(Icons.tune_rounded,
-                        size: 20, color: cs.primary),
-                    title: const Text('选项透明度'),
-                    subtitle: Text(
-                      '当前 ${(state.cardOpacity * 100).round()}%'
-                      '（数值越大，前景卡片/底栏越不透明）',
-                      style: tt.labelSmall,
+                  // （卡片/底栏/列表项/弹窗/筛选按钮）的半透明程度。
+                  // 即使未设置自定义背景也可调（默认 100% 完全不透明）。
+                  // 滑杆布局重设计：去除提示副标题，滑杆放在名称下方
+                  // 占整行宽度；范围 10~100（最低 10% 避免前景完全透明）。
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.tune_rounded, size: 20, color: cs.primary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text('选项透明度',
+                              style: tt.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600)),
+                        ),
+                        Text(
+                          '${(state.cardOpacity * 100).round()}%',
+                          style: tt.labelMedium?.copyWith(color: cs.primary),
+                        ),
+                      ],
                     ),
-                    trailing: SizedBox(
-                      width: 130,
-                      child: Slider(
-                        min: 20,
-                        max: 100,
-                        divisions: 80,
-                        value:
-                            (state.cardOpacity * 100).round().toDouble(),
-                        onChanged: (double v) =>
-                            state.setCardOpacity(v / 100.0),
-                      ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 16, 8),
+                    child: Slider(
+                      min: 10,
+                      max: 100,
+                      divisions: 90,
+                      value: (state.cardOpacity * 100).round().toDouble(),
+                      onChanged: (double v) =>
+                          state.setCardOpacity(v / 100.0),
                     ),
                   ),
                 ],
