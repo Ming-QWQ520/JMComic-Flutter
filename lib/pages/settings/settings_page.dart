@@ -606,26 +606,15 @@ class SettingsPage extends StatelessWidget {
   }
 
   /// 打开下载文件夹（系统文件管理器）。
-  /// 修复：原实现 hasStorage 在 Windows 永远返回 true，但 Android
-  /// 在已授权前的早期阶段会 fallback 到 ensureStorage，导致用户
-  /// 看到不必要的系统设置跳转。这里只在 Android 真正未授权时
-  /// 调用 ensureStorage，且对失败的情况给出更明确的指引。
+  ///
+  /// 关键修复：打开前绝不做存储权限检查/申请——那会把用户带去系统
+  /// 设置页，表现为"点打开没反应/不正常调用"。文件管理器读取公共
+  /// 目录靠其自身权限，与 APP 的授权状态无关。
   Future<void> _openDownloadFolder(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final dir = await DownloadManager.instance.baseDir();
-      // 仅 Android 在权限缺失时才申请，避免无谓跳系统设置。
-      if (StorageService.isAndroid && !await StorageService.hasStorage()) {
-        final granted = await StorageService.ensureStorage();
-        if (!granted) {
-          messenger.showSnackBar(SnackBar(
-            content: Text('未授予"所有文件访问"权限，已跳转系统设置。'
-                '请授权后返回再次点击打开。手动路径：${dir.path}'),
-            duration: const Duration(seconds: 5),
-          ));
-          return;
-        }
-      }
+      if (!dir.existsSync()) dir.createSync(recursive: true);
       final ok = await StorageService.openFolder(dir.path);
       if (!ok) {
         messenger.showSnackBar(SnackBar(

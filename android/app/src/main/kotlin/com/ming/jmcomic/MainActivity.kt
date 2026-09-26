@@ -342,45 +342,32 @@ class MainActivity : FlutterActivity() {
         // 导致只显示系统"文件"或一两个应用，MT 管理器、Solid Explorer
         // 等第三方文件管理器不在列表中。
         //
-        // 新方案：主动查询 PackageManager 枚举所有响应 ACTION_VIEW + file:// +
-        // 任一目录 MIME 的应用，按 packageName 去重后用自定义 AlertDialog 列出，
-        // 每个应用一条目，确保用户能看到所有已安装的文件管理器。
+        // 方案：主动查询 PackageManager 枚举所有响应目录 URI 的应用
+        // （file:// 各目录 MIME + SAF content:// 各一套），按 packageName
+        // 去重后用自定义对话框列出。启动时用「该候选自己匹配到的 Intent」
+        // ——此前统一用 file:// URI 启动，SAF-only 的系统文件管理器
+        // 收到 file:// 无法定位目录，表现为"打开方式不正常调用"。
         val fileUri = Uri.fromFile(dir)
-        val mimeTypes = listOf(
-            android.provider.DocumentsContract.Document.MIME_TYPE_DIR,
-            "resource/folder",
+        val candidates = LinkedHashMap<String, Pair<ResolveInfo, Intent>>()
+        val fileMimes = listOf(
             "resource/directory",
+            "resource/folder",
             "vnd.android.document/directory"
         )
-
-        val candidates = mutableMapOf<String, ResolveInfo>()
-        for (mime in mimeTypes) {
+        for (mime in fileMimes) {
             val it = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(fileUri, mime)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val list = try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.queryIntentActivities(
-                        it, PackageManager.ResolveInfoFlags.of(0L)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.queryIntentActivities(it, 0)
-                }
-            } catch (_: Exception) {
-                emptyList<ResolveInfo>()
-            }
-            for (info in list) {
+            for (info in queryActivities(it)) {
                 val pkg = info.activityInfo?.packageName ?: continue
-                if (pkg == packageName) continue  // 排除自身
-                if (pkg !in candidates) candidates[pkg] = info
+                if (pkg == packageName) continue
+                if (pkg !in candidates) candidates[pkg] = Pair(info, it)
             }
         }
 
-        // SAF content:// URI 单独查一次：某些 ROM 的系统文件管理器只响应
-        // SAF URI（content://com.android.externalstorage.documents/...），
-        // 通过 queryIntentActivities 也会命中。
+        // SAF content:// URI 单独查一次：部分 ROM 的系统文件管理器只
+        // 响应 SAF URI（content://com.android.externalstorage.documents/...）。
         try {
             toSafInitialUri(path)?.let { docId ->
                 val safUri = android.provider.DocumentsContract.buildDocumentUri(
@@ -393,18 +380,10 @@ class MainActivity : FlutterActivity() {
                     )
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
-                val list = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.queryIntentActivities(
-                        it, PackageManager.ResolveInfoFlags.of(0L)
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    packageManager.queryIntentActivities(it, 0)
-                }
-                for (info in list) {
+                for (info in queryActivities(it)) {
                     val pkg = info.activityInfo?.packageName ?: continue
                     if (pkg == packageName) continue
-                    if (pkg !in candidates) candidates[pkg] = info
+                    if (pkg !in candidates) candidates[pkg] = Pair(info, it)
                 }
             }
         } catch (_: Exception) {
@@ -414,55 +393,68 @@ class MainActivity : FlutterActivity() {
             // 1) 多个候选 → 自定义选择对话框，列出全部应用。
             // 2) 单一候选 → 直接 launch。
             if (candidates.size == 1) {
-                val info = candidates.values.first()
+                val (info, baseIntent) = candidates.values.first()
                 return try {
-                    val launch = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(fileUri, mimeTypes[0])
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        setClassName(info.activityInfo.packageName, info.activityInfo.name)
-                    }
-                    startActivity(launch)
+                    startActivity(
+                        Intent(baseIntent).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            setClassName(
+                                info.activityInfo.packageName,
+                                info.activityInfo.name
+                            )
+                        }
+                    )
                     true
                 } catch (_: Exception) {
                     openSafFallback(path)
                 }
             }
-            return showFolderChooser(path, fileUri, mimeTypes, candidates.values.toList())
+            return showFolderChooser(path, candidates)
         }
 
         return openSafFallback(path)
     }
 
+    /// 包可见性安全的 queryIntentActivities 封装。
+    private fun queryActivities(intent: Intent): List<ResolveInfo> {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.queryIntentActivities(
+                    intent, PackageManager.ResolveInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.queryIntentActivities(intent, 0)
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     /// 自定义文件夹打开方式选择器：列出所有匹配的应用。
-    /// 完全替代 Intent.createChooser + EXTRA_INITIAL_INTENTS——后者在部分
-    /// 定制 ROM（vivo/MIUI/EMUI）会丢条目或合并到一两个应用。
+    /// 每个候选使用其自己匹配到的 Intent 启动（file:// 或 SAF content://）。
     private fun showFolderChooser(
         path: String,
-        fileUri: Uri,
-        mimeTypes: List<String>,
-        candidates: List<ResolveInfo>
+        candidates: Map<String, Pair<ResolveInfo, Intent>>,
     ): Boolean {
-        val labels = candidates.map { it.loadLabel(packageManager).toString() }
-        val icons = candidates.map {
-            try { it.loadIcon(packageManager) } catch (_: Exception) { null }
-        }
-        val displayLabels = labels.mapIndexed { i, l ->
-            if (icons[i] != null) l else l  // 文本兜底（图标在 dialog 适配器里加载）
-        }.toTypedArray()
+        val entries = candidates.values.toList()
+        val labels = entries.map { it.first.loadLabel(packageManager).toString() }
+        val displayLabels = labels.toTypedArray()
 
         val builder = AlertDialog.Builder(this)
             .setTitle("使用以下应用打开文件夹")
             .setItems(displayLabels) { _, which ->
-                val info = candidates[which]
+                val (info, baseIntent) = entries[which]
                 try {
-                    val launch = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(fileUri, mimeTypes[0])
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        setClassName(info.activityInfo.packageName, info.activityInfo.name)
-                    }
-                    startActivity(launch)
+                    startActivity(
+                        Intent(baseIntent).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            setClassName(
+                                info.activityInfo.packageName,
+                                info.activityInfo.name
+                            )
+                        }
+                    )
                 } catch (_: Exception) {
                     openSafFallback(path)
                 }

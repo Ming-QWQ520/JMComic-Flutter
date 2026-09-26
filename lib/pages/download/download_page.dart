@@ -114,15 +114,14 @@ class _DownloadPageState extends State<DownloadPage> {
   }
 
   /// 调用系统文件管理器打开下载根目录。
+  ///
+  /// 打开前不做存储权限检查/申请（会跳系统设置页，表现为"打不开"）；
+  /// 文件管理器读取公共目录靠其自身权限。
   Future<void> _openDownloadFolder() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final dir = await mgr.baseDir();
       if (!dir.existsSync()) dir.createSync(recursive: true);
-      // 公共目录场景下未授权时文件管理器也看不到内容，先确保权限
-      if (!await StorageService.hasStorage()) {
-        await StorageService.ensureStorage();
-      }
       final ok = await StorageService.openFolder(dir.path);
       if (!ok) {
         messenger.showSnackBar(SnackBar(
