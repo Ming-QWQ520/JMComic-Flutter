@@ -73,6 +73,11 @@ class JmComicApp extends StatelessWidget {
             final Brightness iconBrightness = scheme.isDark
                 ? Brightness.light
                 : Brightness.dark;
+            // 冲刷冷启动期间排队的跳转请求（快捷方式/组件点击）。
+            // 队列为空时仅一次空判断，零开销。
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              WidgetBridge.instance.flushPendingRoutes();
+            });
             return AnnotatedRegion<SystemUiOverlayStyle>(
               value: SystemUiOverlayStyle(
                 statusBarColor: Colors.transparent,

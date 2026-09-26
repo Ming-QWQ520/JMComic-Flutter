@@ -337,135 +337,38 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 关键修复：先前用 Intent.createChooser + EXTRA_INITIAL_INTENTS，
-        // 部分系统 ROM（vivo/小米/华为等定制 OS）会合并或丢弃 INITIAL_INTENTS，
-        // 导致只显示系统"文件"或一两个应用，MT 管理器、Solid Explorer
-        // 等第三方文件管理器不在列表中。
-        //
-        // 方案：主动查询 PackageManager 枚举所有响应目录 URI 的应用
-        // （file:// 各目录 MIME + SAF content:// 各一套），按 packageName
-        // 去重后用自定义对话框列出。启动时用「该候选自己匹配到的 Intent」
-        // ——此前统一用 file:// URI 启动，SAF-only 的系统文件管理器
-        // 收到 file:// 无法定位目录，表现为"打开方式不正常调用"。
-        val fileUri = Uri.fromFile(dir)
-        val candidates = LinkedHashMap<String, Pair<ResolveInfo, Intent>>()
-        val fileMimes = listOf(
-            "resource/directory",
-            "resource/folder",
-            "vnd.android.document/directory"
-        )
-        for (mime in fileMimes) {
-            val it = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, mime)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            for (info in queryActivities(it)) {
-                val pkg = info.activityInfo?.packageName ?: continue
-                if (pkg == packageName) continue
-                if (pkg !in candidates) candidates[pkg] = Pair(info, it)
-            }
-        }
-
-        // SAF content:// URI 单独查一次：部分 ROM 的系统文件管理器只
-        // 响应 SAF URI（content://com.android.externalstorage.documents/...）。
+        // 标准系统方案（用户要求不用自研枚举/对话框）：
+        // 主意图 = SAF content:// 目录 URI（系统"文件管理"可直接定位），
+        // 交给标准 Intent.createChooser——列出系统与第三方文件管理器。
+        // SAF URI 构建失败时退回 file:// + resource/directory。
+        val primary = Intent(Intent.ACTION_VIEW)
         try {
             toSafInitialUri(path)?.let { docId ->
-                val safUri = android.provider.DocumentsContract.buildDocumentUri(
-                    "com.android.externalstorage.documents", docId
+                primary.setDataAndType(
+                    android.provider.DocumentsContract.buildDocumentUri(
+                        "com.android.externalstorage.documents", docId
+                    ),
+                    android.provider.DocumentsContract.Document.MIME_TYPE_DIR
                 )
-                val it = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(
-                        safUri,
-                        android.provider.DocumentsContract.Document.MIME_TYPE_DIR
-                    )
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-                for (info in queryActivities(it)) {
-                    val pkg = info.activityInfo?.packageName ?: continue
-                    if (pkg == packageName) continue
-                    if (pkg !in candidates) candidates[pkg] = Pair(info, it)
-                }
             }
         } catch (_: Exception) {
         }
-
-        if (candidates.isNotEmpty()) {
-            // 1) 多个候选 → 自定义选择对话框，列出全部应用。
-            // 2) 单一候选 → 直接 launch。
-            if (candidates.size == 1) {
-                val (info, baseIntent) = candidates.values.first()
-                return try {
-                    startActivity(
-                        Intent(baseIntent).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            setClassName(
-                                info.activityInfo.packageName,
-                                info.activityInfo.name
-                            )
-                        }
-                    )
-                    true
-                } catch (_: Exception) {
-                    openSafFallback(path)
-                }
-            }
-            return showFolderChooser(path, candidates)
+        if (primary.data == null) {
+            primary.setDataAndType(
+                Uri.fromFile(dir), "resource/directory"
+            )
         }
+        primary.addFlags(
+            Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+        )
 
-        return openSafFallback(path)
-    }
-
-    /// 包可见性安全的 queryIntentActivities 封装。
-    private fun queryActivities(intent: Intent): List<ResolveInfo> {
+        // 标准 chooser；ROM 丢弃候选时用户侧表现为仅少量选项，
+        // 但这是系统标准行为，各文件管理器按各自 intent-filter 出现。
         return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                packageManager.queryIntentActivities(
-                    intent, PackageManager.ResolveInfoFlags.of(0L)
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                packageManager.queryIntentActivities(intent, 0)
-            }
+            startActivity(Intent.createChooser(primary, "打开文件夹"))
+            true
         } catch (_: Exception) {
-            emptyList()
-        }
-    }
-
-    /// 自定义文件夹打开方式选择器：列出所有匹配的应用。
-    /// 每个候选使用其自己匹配到的 Intent 启动（file:// 或 SAF content://）。
-    private fun showFolderChooser(
-        path: String,
-        candidates: Map<String, Pair<ResolveInfo, Intent>>,
-    ): Boolean {
-        val entries = candidates.values.toList()
-        val labels = entries.map { it.first.loadLabel(packageManager).toString() }
-        val displayLabels = labels.toTypedArray()
-
-        val builder = AlertDialog.Builder(this)
-            .setTitle("使用以下应用打开文件夹")
-            .setItems(displayLabels) { _, which ->
-                val (info, baseIntent) = entries[which]
-                try {
-                    startActivity(
-                        Intent(baseIntent).apply {
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            setClassName(
-                                info.activityInfo.packageName,
-                                info.activityInfo.name
-                            )
-                        }
-                    )
-                } catch (_: Exception) {
-                    openSafFallback(path)
-                }
-            }
-            .setNegativeButton("取消") { d, _ -> d.dismiss() }
-        try {
-            val dialog = builder.create()
-            dialog.show()
-            return true
-        } catch (_: Exception) {
-            return openSafFallback(path)
+            openSafFallback(path)
         }
     }
 

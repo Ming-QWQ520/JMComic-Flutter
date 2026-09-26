@@ -255,7 +255,7 @@ class _ReaderPageState extends State<ReaderPage> {
                       color: Theme.of(c).colorScheme.primary)
                   : const SizedBox(width: 24),
               title: Text(
-                s.name.isEmpty ? '第${s.sort}话' : s.name,
+                s.displayTitle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: current

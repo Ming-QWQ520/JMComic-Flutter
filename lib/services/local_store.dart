@@ -14,6 +14,24 @@ class LocalStore {
   Future<SharedPreferences> get _db async =>
       _prefs ??= await SharedPreferences.getInstance();
 
+  /// 启动时预热：在 runApp 之前加载 SharedPreferences 实例，
+  /// 使下方的 *Sync 同步读取在首帧前即可命中缓存。
+  /// （配合 AppState 构造函数的同步预载，避免"先默认主题、
+  /// 首帧后跳变成保存样式"的闪变。）
+  Future<void> warmUp() async {
+    _prefs ??= await SharedPreferences.getInstance();
+  }
+
+  // ---------- 同步读取（需先 warmUp，未命中时返回默认值） ----------
+
+  String getStringSync(String key, [String def = '']) =>
+      _prefs?.getString(key) ?? def;
+
+  bool getBoolSync(String key, [bool def = false]) =>
+      _prefs?.getBool(key) ?? def;
+
+  int getIntSync(String key, [int def = 0]) => _prefs?.getInt(key) ?? def;
+
   // ---------- 基础类型 ----------
 
   Future<String> getString(String key, [String def = '']) async {

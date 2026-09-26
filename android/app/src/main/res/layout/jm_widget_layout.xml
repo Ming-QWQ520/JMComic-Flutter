@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  桌面小组件布局：随机推荐轮播（每页一部漫画：封面 + 名称 + JM号）。
+  桌面小组件布局：用户页 + 5 个随机推荐页（ViewFlipper 静态子页）。
 
-  - ViewFlipper(@+id/flipper) 的子页由 JmHomeWidgetProvider 通过
-    RemoteViews.addView 动态添加（每页对应 layout/jm_widget_page.xml），
-    左右翻页由底部 ◀ / ▶ 按钮触发（RemoteViews 不支持触摸手势，
-    横滑会被桌面自身拦截为换屏，故用按钮翻页）；
-  - 底部行：页码指示 + ◀ ▶ ⟳（刷新拉取新一批随机推荐）；
-  - 刷新按钮通过 PendingIntent 拉起 APP（jm_action=widget_refresh），
-    由 Flutter 端重新请求随机推荐并写回 widget。
+  关键：RemoteViews 的动态 addView 在部分桌面/ROM 上渲染失败（白屏），
+  这里改用「XML 静态声明全部子页 + 运行时按 id 填充/隐藏」的兼容写法：
+  - 子页 1：用户页（头像 + 用户名，整页点击拉起 APP）；
+  - 子页 2..6：随机推荐漫画（封面 + 名称 + JM号，整页点击打开详情），
+    未用到的页由 Provider setViewVisibility(GONE) 隐藏；
+  - 左右翻页由底部 ◀ / ▶ 按钮触发（RemoteViews 不支持触摸手势，
+    横滑会被桌面自身拦截为换屏）；
+  - ⟳ 刷新由 Provider 原生拉取随机推荐并重绘，不进 APP。
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -21,14 +22,282 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- 随机推荐轮播页容器（子页动态添加） -->
         <ViewFlipper
             android:id="@+id/flipper"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
             android:inAnimation="@android:anim/fade_in"
-            android:outAnimation="@android:anim/fade_out" />
+            android:outAnimation="@android:anim/fade_out">
+
+            <!-- 子页 1：用户页 -->
+            <LinearLayout
+                android:id="@+id/pageUser"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/userAvatar"
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="用户头像" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/userName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="未登录"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:maxLines="1"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/userSubtitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="点击打开 APP"
+                        android:textColor="#99FFFFFF"
+                        android:textSize="11sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 子页 2..6：随机推荐漫画（id 唯一：pageComic1..5） -->
+            <LinearLayout
+                android:id="@+id/pageComic1"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/albumCover1"
+                    android:layout_width="62dp"
+                    android:layout_height="86dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="漫画封面" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/albumName1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/albumJmId1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFF8C42"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/pageComic2"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/albumCover2"
+                    android:layout_width="62dp"
+                    android:layout_height="86dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="漫画封面" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/albumName2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/albumJmId2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFF8C42"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/pageComic3"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/albumCover3"
+                    android:layout_width="62dp"
+                    android:layout_height="86dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="漫画封面" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/albumName3"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/albumJmId3"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFF8C42"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/pageComic4"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/albumCover4"
+                    android:layout_width="62dp"
+                    android:layout_height="86dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="漫画封面" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/albumName4"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/albumJmId4"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFF8C42"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/pageComic5"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="8dp">
+
+                <ImageView
+                    android:id="@+id/albumCover5"
+                    android:layout_width="62dp"
+                    android:layout_height="86dp"
+                    android:scaleType="centerCrop"
+                    android:src="@mipmap/ic_launcher"
+                    android:contentDescription="漫画封面" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="4dp">
+
+                    <TextView
+                        android:id="@+id/albumName5"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="#FFFFFFFF"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:maxLines="3"
+                        android:ellipsize="end" />
+
+                    <TextView
+                        android:id="@+id/albumJmId5"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:textColor="#FFFF8C42"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+        </ViewFlipper>
 
         <!-- 底部操作行：页码 + 左右翻页 + 刷新 -->
         <LinearLayout
@@ -53,7 +322,7 @@
                 android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:src="@android:drawable/ic_media_previous"
-                android:contentDescription="上一部" />
+                android:contentDescription="上一页" />
 
             <ImageButton
                 android:id="@+id/btnNext"
@@ -61,7 +330,7 @@
                 android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:src="@android:drawable/ic_media_next"
-                android:contentDescription="下一部" />
+                android:contentDescription="下一页" />
 
             <ImageButton
                 android:id="@+id/btnRefresh"
@@ -69,7 +338,7 @@
                 android:layout_height="30dp"
                 android:background="?android:attr/selectableItemBackground"
                 android:src="@android:drawable/ic_popup_sync"
-                android:contentDescription="换一批随机推荐" />
+                android:contentDescription="刷新随机推荐" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

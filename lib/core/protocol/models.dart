@@ -202,6 +202,19 @@ class SeriesItem {
   final String id;
   final String name;
   final String sort;
+
+  /// 章节展示标题。
+  ///
+  /// 部分漫画（如 JM1468592）的章节 name 直接是纯数字（"1"、"2"），
+  /// 目录里会显示成孤零零的数字；这里统一规范为「第x话」：
+  /// name 为空或纯数字时用 name（其次 sort）拼成 第x话，
+  /// 否则原样返回（如「番外篇」「最终话」）。
+  String get displayTitle {
+    final n = name.trim();
+    if (n.isEmpty) return '第$sort话';
+    if (RegExp(r'^\d+$').hasMatch(n)) return '第$n话';
+    return n;
+  }
 }
 
 /// 关联作品。
