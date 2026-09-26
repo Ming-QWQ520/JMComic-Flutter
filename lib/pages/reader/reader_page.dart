@@ -40,11 +40,20 @@ class _ReaderPageState extends State<ReaderPage> {
   final ScrollController _listCtrl = ScrollController();
   final FocusNode _focus = FocusNode();
 
-  /// 双击放大使用的变换控制器：单击切换上下菜单，双击在 1x ↔ 2x 之间
+  /// 双击放大使用的变换控制器：单击切换上下菜单，双击在 1x ↔ 2.5x 之间
   /// 切换；双手指缩放由 InteractiveViewer 默认行为处理（maxScale=4）。
   /// `_xCtrl` 由所有页面的 InteractiveViewer 共享，跨页切换时重置为 1x。
   final TransformationController _xCtrl = TransformationController();
   bool _doubleTapZoomed = false;
+
+  /// 当前按下的指针数：≥2 时临时禁用 PageView 滚动，
+  /// 否则 PageView 的横向拖动手势会在手势竞技场中抢走双指缩放
+  /// （两指同向移动时 HorizontalDrag 先于 Scale 越过阈值获胜），
+  /// 表现为"无法双指放大/缩小"。
+  int _activePointers = 0;
+
+  /// 双击位置（onDoubleTapDown 捕获），用于围绕点击位置缩放。
+  Offset _doubleTapPos = Offset.zero;
 
   String _albumId = '';
   String _chapterId = '';
@@ -335,24 +344,41 @@ class _ReaderPageState extends State<ReaderPage> {
     }
   }
 
-  /// 双击：在 1x 与 2x 之间切换缩放。单击仍由 _toggleBar 处理（弹/收
-  /// 上下菜单），双手指缩放由 InteractiveViewer 默认行为处理。
-  /// 切换时同步重置 _doubleTapZoomed 标志，避免状态错乱。
+  /// 双击：在 1x 与 2.5x 之间切换缩放（围绕双击位置放大）。
+  /// 单击仍由 _toggleBar 处理（弹/收上下菜单），双手指缩放由
+  /// InteractiveViewer 默认行为处理。
   void _toggleDoubleTapZoom() {
+    // 上下滚动模式没有 InteractiveViewer，双击不缩放（避免误隐藏菜单）
+    if (_direction == ReadDirection.vertical) return;
     setState(() {
-      _doubleTapZoomed = !_doubleTapZoomed;
-      // InteractiveViewer 默认 alignment=center，scale(2) 后图像中心
-      // 仍可见，用户可双指 / 单指拖动平移查看其它区域。
-      // 用 diagonal3Values 直接构造，避免 deprecated scale()。
-      _xCtrl.value = _doubleTapZoomed
-          ? Matrix4.diagonal3Values(2.0, 2.0, 2.0)
-          : Matrix4.identity();
+      if (_doubleTapZoomed) {
+        _doubleTapZoomed = false;
+        _xCtrl.value = Matrix4.identity();
+        return;
+      }
+      _doubleTapZoomed = true;
+      // 围绕双击位置缩放：平移到点击点 × 缩放 × 平移回原点
+      final p = _doubleTapPos;
+      _xCtrl.value = Matrix4.identity()
+        ..translateByDouble(p.dx, p.dy, 0, 1)
+        ..scaleByDouble(2.5, 2.5, 1, 1)
+        ..translateByDouble(-p.dx, -p.dy, 0, 1);
       // 放大时若顶/底栏可见，隐藏以最大化可视区域
-      if (_doubleTapZoomed && _barVisible) {
+      if (_barVisible) {
         _barVisible = false;
         _hideBarTimer?.cancel();
       }
     });
+  }
+
+  /// 翻页后重置缩放（_xCtrl 为所有页共享）。
+  void _resetZoom() {
+    if (!_doubleTapZoomed &&
+        _xCtrl.value == Matrix4.identity()) {
+      return;
+    }
+    _doubleTapZoomed = false;
+    _xCtrl.value = Matrix4.identity();
   }
 
   void _scheduleHideBar() {
@@ -517,9 +543,10 @@ class _ReaderPageState extends State<ReaderPage> {
               onKeyEvent: _onKey,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
-                // 单击：切换上下菜单；双击：在 1x ↔ 2x 之间切换缩放。
+                // 单击：切换上下菜单；双击：围绕点击位置 1x↔2.5x 缩放。
                 // 双手缩放（pinch-to-zoom）由 InteractiveViewer 默认行为处理。
                 onTap: _toggleBar,
+                onDoubleTapDown: (TapDownDetails d) => _doubleTapPos = d.localPosition,
                 onDoubleTap: _toggleDoubleTapZoom,
                 child: _buildContent(),
               ),
@@ -632,18 +659,40 @@ class _ReaderPageState extends State<ReaderPage> {
       );
     }
     final rtl = _direction == ReadDirection.rightToLeft;
-    return PageView.builder(
-      key: ValueKey<String>('reader-paged-$rtl'),
-      scrollDirection: Axis.horizontal,
-      reverse: rtl,
-      controller: _pageCtrl,
-      itemCount: _images.length,
-      onPageChanged: (int i) {
-        setState(() => _currentPage = i);
-        _preload(i + 1);
-        if (_barVisible) _scheduleHideBar();
+    // Listener 统计活跃指针：双指触控时临时禁用 PageView 滚动
+    // （NeverScrollable 会移除其拖动手势识别器），让 InteractiveViewer
+    // 的缩放手势在竞技场中获胜 —— 修复"无法双指放大/缩小"。
+    return Listener(
+      onPointerDown: (PointerDownEvent e) {
+        _activePointers++;
+        if (_activePointers == 2) setState(() {});
       },
-      itemBuilder: (BuildContext c, int i) => _pageImage(i),
+      onPointerUp: (PointerUpEvent e) {
+        _activePointers = (_activePointers - 1).clamp(0, 8);
+        if (_activePointers == 1) setState(() {});
+      },
+      onPointerCancel: (PointerCancelEvent e) {
+        _activePointers = (_activePointers - 1).clamp(0, 8);
+        if (_activePointers == 1) setState(() {});
+      },
+      child: PageView.builder(
+        key: ValueKey<String>('reader-paged-$rtl'),
+        scrollDirection: Axis.horizontal,
+        reverse: rtl,
+        controller: _pageCtrl,
+        // 双指触控期间禁用翻页手势（null = 平台默认翻页物理）
+        physics: _activePointers > 1
+            ? const NeverScrollableScrollPhysics()
+            : null,
+        itemCount: _images.length,
+        onPageChanged: (int i) {
+          _resetZoom();
+          setState(() => _currentPage = i);
+          _preload(i + 1);
+          if (_barVisible) _scheduleHideBar();
+        },
+        itemBuilder: (BuildContext c, int i) => _pageImage(i),
+      ),
     );
   }
 
@@ -744,7 +793,19 @@ class _ReaderPageState extends State<ReaderPage> {
     }
     return InteractiveViewer(
       transformationController: _xCtrl,
+      minScale: 1.0,
       maxScale: 4,
+      panEnabled: true,
+      // 双指捏合缩回 1x 时自动复位并还原双击标志
+      onInteractionEnd: (ScaleEndDetails d) {
+        final s = _xCtrl.value.getMaxScaleOnAxis();
+        if (s < 1.05 && _doubleTapZoomed) {
+          setState(() {
+            _doubleTapZoomed = false;
+            _xCtrl.value = Matrix4.identity();
+          });
+        }
+      },
       child: Center(
         child: Image.memory(
           bytes,

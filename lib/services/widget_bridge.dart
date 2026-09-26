@@ -105,21 +105,20 @@ class WidgetBridge {
     }
   }
 
-  /// 把一部随机推荐漫画同步到桌面小组件。
-  Future<void> writeRandomAlbum({
-    required String name,
-    required String id,
-    required String coverUrl,
-  }) async {
-    if (!Platform.isAndroid) return;
+  /// 把一批随机推荐漫画同步到桌面小组件（多页轮播展示）。
+  ///
+  /// [albums] 每项含 name / id / coverUrl；widget 端按 ViewFlipper
+  /// 多页渲染，左右翻页按钮 + 页码指示，点击某页打开对应详情。
+  Future<void> writeRandomAlbums(
+    List<Map<String, String>> albums,
+  ) async {
+    if (!Platform.isAndroid || albums.isEmpty) return;
     try {
-      await _channel.invokeMethod<bool>('writeRandomAlbum', <String, dynamic>{
-        'name': name,
-        'id': id,
-        'coverUrl': coverUrl,
+      await _channel.invokeMethod<bool>('writeRandomAlbums', <String, dynamic>{
+        'albums': albums,
       });
     } on PlatformException {
-      // 静默失败
+      // 静默失败：widget 不应阻塞主流程
     }
   }
 }

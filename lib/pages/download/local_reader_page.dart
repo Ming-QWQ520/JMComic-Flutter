@@ -26,10 +26,17 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
   final ScrollController _listCtrl = ScrollController();
   final Map<int, BuildContext> _itemCtx = <int, BuildContext>{};
 
-  /// 双击放大变换控制器：单击切菜单，双击 1x↔2x，双手指缩放由
-  /// InteractiveViewer 默认行为处理（maxScale=4）。
+  /// 双击放大变换控制器：单击切菜单，双击围绕点击位置 1x↔2.5x；
+  /// 双手指缩放由 InteractiveViewer 默认行为处理（maxScale=4）。
   final TransformationController _xCtrl = TransformationController();
   bool _doubleTapZoomed = false;
+
+  /// 当前按下的指针数：≥2 时临时禁用 PageView 滚动，避免其横向拖动
+  /// 在手势竞技场中抢走 InteractiveViewer 的双指缩放。
+  int _activePointers = 0;
+
+  /// 双击位置（onDoubleTapDown 捕获），用于围绕点击位置缩放。
+  Offset _doubleTapPos = Offset.zero;
 
   List<String> _files = <String>[];
   String _title = '';
@@ -62,17 +69,37 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
     super.dispose();
   }
 
+  /// 双击：在 1x 与 2.5x 之间切换缩放（围绕双击位置放大）。
+  /// 上下滚动模式没有 InteractiveViewer，双击不缩放。
   void _toggleDoubleTapZoom() {
+    if (_direction == ReadDirection.vertical) return;
     setState(() {
-      _doubleTapZoomed = !_doubleTapZoomed;
-      _xCtrl.value = _doubleTapZoomed
-          ? Matrix4.diagonal3Values(2.0, 2.0, 2.0)
-          : Matrix4.identity();
-      if (_doubleTapZoomed && _barVisible) {
+      if (_doubleTapZoomed) {
+        _doubleTapZoomed = false;
+        _xCtrl.value = Matrix4.identity();
+        return;
+      }
+      _doubleTapZoomed = true;
+      // 围绕双击位置缩放：平移到点击点 × 缩放 × 平移回原点
+      final p = _doubleTapPos;
+      _xCtrl.value = Matrix4.identity()
+        ..translateByDouble(p.dx, p.dy, 0, 1)
+        ..scaleByDouble(2.5, 2.5, 1, 1)
+        ..translateByDouble(-p.dx, -p.dy, 0, 1);
+      if (_barVisible) {
         _barVisible = false;
         _hideBarTimer?.cancel();
       }
     });
+  }
+
+  /// 翻页后重置缩放（_xCtrl 为所有页共享）。
+  void _resetZoom() {
+    if (!_doubleTapZoomed && _xCtrl.value == Matrix4.identity()) {
+      return;
+    }
+    _doubleTapZoomed = false;
+    _xCtrl.value = Matrix4.identity();
   }
 
   ReadDirection get _direction => context.read<AppState>().readDirection;
@@ -160,9 +187,11 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              // 单击切换上下菜单；双击切换 1x↔2x 缩放；双手指缩放由
-              // InteractiveViewer 默认行为处理。
+              // 单击切换上下菜单；双击围绕点击位置 1x↔2.5x 缩放；
+              // 双手指缩放由 InteractiveViewer 默认行为处理。
               onTap: _toggleBar,
+              onDoubleTapDown: (TapDownDetails d) =>
+                  _doubleTapPos = d.localPosition,
               onDoubleTap: _toggleDoubleTapZoom,
               child: _buildContent(),
             ),
@@ -238,29 +267,62 @@ class _LocalReaderPageState extends State<LocalReaderPage> {
       );
     }
     final rtl = _direction == ReadDirection.rightToLeft;
-    return PageView.builder(
-      key: ValueKey<String>('local-reader-paged-$rtl'),
-      controller: _pageCtrl,
-      scrollDirection: Axis.horizontal,
-      reverse: rtl,
-      itemCount: _files.length,
-      onPageChanged: (int i) {
-        setState(() => _currentPage = i);
-        if (_barVisible) _scheduleHideBar();
+    // Listener 统计活跃指针：双指触控时临时禁用 PageView 滚动，
+    // 让 InteractiveViewer 的缩放手势在竞技场中获胜。
+    return Listener(
+      onPointerDown: (PointerDownEvent e) {
+        _activePointers++;
+        if (_activePointers == 2) setState(() {});
       },
-      itemBuilder: (_, i) {
-        final f = File(_files[i]);
-        return InteractiveViewer(
-          transformationController: _xCtrl,
-          maxScale: 4,
-          child: Center(
-            child: f.existsSync()
-                ? Image.file(f, fit: BoxFit.contain, gaplessPlayback: true)
-                : const Icon(Icons.broken_image_rounded,
-                    color: Colors.white24, size: 42),
-          ),
-        );
+      onPointerUp: (PointerUpEvent e) {
+        _activePointers = (_activePointers - 1).clamp(0, 8);
+        if (_activePointers == 1) setState(() {});
       },
+      onPointerCancel: (PointerCancelEvent e) {
+        _activePointers = (_activePointers - 1).clamp(0, 8);
+        if (_activePointers == 1) setState(() {});
+      },
+      child: PageView.builder(
+        key: ValueKey<String>('local-reader-paged-$rtl'),
+        controller: _pageCtrl,
+        scrollDirection: Axis.horizontal,
+        reverse: rtl,
+        // 双指触控期间禁用翻页手势（null = 平台默认翻页物理）
+        physics: _activePointers > 1
+            ? const NeverScrollableScrollPhysics()
+            : null,
+        itemCount: _files.length,
+        onPageChanged: (int i) {
+          _resetZoom();
+          setState(() => _currentPage = i);
+          if (_barVisible) _scheduleHideBar();
+        },
+        itemBuilder: (_, i) {
+          final f = File(_files[i]);
+          return InteractiveViewer(
+            transformationController: _xCtrl,
+            minScale: 1.0,
+            maxScale: 4,
+            panEnabled: true,
+            // 双指捏合缩回 1x 时自动复位
+            onInteractionEnd: (ScaleEndDetails d) {
+              final s = _xCtrl.value.getMaxScaleOnAxis();
+              if (s < 1.05 && _doubleTapZoomed) {
+                setState(() {
+                  _doubleTapZoomed = false;
+                  _xCtrl.value = Matrix4.identity();
+                });
+              }
+            },
+            child: Center(
+              child: f.existsSync()
+                  ? Image.file(f, fit: BoxFit.contain, gaplessPlayback: true)
+                  : const Icon(Icons.broken_image_rounded,
+                      color: Colors.white24, size: 42),
+            ),
+          );
+        },
+      ),
     );
   }
 
