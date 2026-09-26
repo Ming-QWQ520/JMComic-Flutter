@@ -1,8 +1,10 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'app.dart';
+import 'services/widget_bridge.dart';
 import 'state/app_state.dart';
 
 void main() {
@@ -29,6 +31,16 @@ void main() {
       systemNavigationBarContrastEnforced: false,
     ),
   );
+  // 配置 WidgetBridge：Native 通过 channel 触发跳转时，通过全局
+  // navigatorKey 执行 pushNamed，避免依赖 BuildContext。
+  WidgetBridge.instance.configure(
+    pushNamed: (String routeName, {Object? arguments}) async {
+      final state = _navigatorKey.currentState;
+      if (state != null) {
+        state.pushNamed(routeName, arguments: arguments);
+      }
+    },
+  );
   runApp(
     ChangeNotifierProvider<AppState>(
       create: (_) => AppState()..init(),
@@ -36,3 +48,10 @@ void main() {
     ),
   );
 }
+
+/// 全局 navigatorKey：让 WidgetBridge 在 Native 回调中也能执行路由跳转。
+/// 由 JmComicApp 的 MaterialApp 关联，WidgetBridge 配置时已注入 pushNamed。
+final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>(debugLabel: 'jm_root');
+
+/// 供 app.dart 获取全局 navigatorKey 用。
+GlobalKey<NavigatorState> get rootNavigatorKey => _navigatorKey;

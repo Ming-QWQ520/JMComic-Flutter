@@ -67,93 +67,92 @@ class _HomePageState extends State<HomePage>
     }
 
     return Scaffold(
-      body: CustomScrollView(
-        slivers: <Widget>[
-          SliverAppBar(
-            pinned: true,
-            // 顶部「发现」字样与右侧操作图标整体上移：压缩展开/收起高度
-            // 与 titlePadding.bottom，让标题更贴近顶部状态栏，配合
-            // 状态栏区域留白更紧凑，避免之前标题位置偏下造成的视觉
-            // 头重脚轻。原 118/64/64 → 96/56/56，padding bottom 14 → 8。
-            expandedHeight: 96,
-            collapsedHeight: 56,
-            toolbarHeight: 56,
-            flexibleSpace: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints c) {
-                // FlexibleSpaceBar 在 expanded 状态下默认 title 偏下，
-                // 用户反馈「首页字样未对齐右侧按键区域」。这里手动按
-                // toolbarHeight=56 的中心垂直对齐 title，避免
-                // FlexibleSpaceBar 默认 padding 把 title 推到底部。
-                final progress = (c.biggest.height - 56) / (96 - 56);
-                final collapsed = (1.0 - progress).clamp(0.0, 1.0);
-                return FlexibleSpaceBar(
-                  titlePadding: EdgeInsets.only(
-                    left: 20,
-                    bottom: 12 + (1 - collapsed) * 8,
-                  ),
+      // NestedScrollView 解决「外滚 + 内滚」嵌套冲突：用户反馈
+      // 在首页滑动至「最新上架」顶部时很难再向上滚（AlbumGrid 的
+      // 内部 GridView 把上滑手势吃掉，到顶后无法平滑交给外层）。
+      // NestedScrollView 让 header 与 body 共享一个 ScrollPosition，
+      // 内滚到顶后自动继续滚外层，体验一致。
+      body: NestedScrollView(
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        headerSliverBuilder: (BuildContext hCtx, bool innerBoxIsScrolled) =>
+            <Widget>[
+              SliverAppBar(
+                pinned: true,
+                floating: false,
+                snap: false,
+                // 顶部「发现」字样进一步上移：用户反馈上一次调整后仍偏下。
+                // expandedHeight 96→76，collapsedHeight/toolbarHeight 56→52，
+                // 让标题与右侧 IconButton 在 expanded 状态下也贴近顶部状态栏。
+                expandedHeight: 76,
+                collapsedHeight: 52,
+                toolbarHeight: 52,
+                flexibleSpace: FlexibleSpaceBar(
+                  titlePadding:
+                      const EdgeInsets.only(left: 20, bottom: 12),
                   centerTitle: false,
                   title: Text(
                     '发现',
-                    style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                );
-              },
-            ),
-            actions: <Widget>[
-              IconButton(
-                tooltip: '每周更新',
-                icon: const Icon(Icons.calendar_month_outlined),
-                onPressed: () => Navigator.pushNamed(context, '/week'),
-              ),
-              IconButton(
-                tooltip: '随机一部',
-                icon: const Icon(Icons.casino_outlined),
-                onPressed: _openRandom,
-              ),
-              // 右上角固定搜索入口：跳转 /search 路由（独立搜索页）。
-              IconButton(
-                tooltip: '搜索',
-                icon: const Icon(Icons.search_rounded),
-                onPressed: () => Navigator.pushNamed(context, '/search'),
-              ),
-              const SizedBox(width: 6),
-            ],
-          ),
-          // promote 分区（对齐 qt IndexView 分区横滑）
-          for (final block in _blocks) ...<Widget>[
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-                child: SectionHeader(title: block.title),
-              ),
-            ),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 218,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: block.bookList.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 10),
-                  itemBuilder: (_, i) => SizedBox(
-                    width: 118,
-                    child: AlbumCard(album: block.bookList[i]),
+                    style: tt.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.w800),
                   ),
                 ),
+                actions: <Widget>[
+                  IconButton(
+                    tooltip: '每周更新',
+                    icon: const Icon(Icons.calendar_month_outlined),
+                    onPressed: () => Navigator.pushNamed(hCtx, '/week'),
+                  ),
+                  IconButton(
+                    tooltip: '随机一部',
+                    icon: const Icon(Icons.casino_outlined),
+                    onPressed: _openRandom,
+                  ),
+                  IconButton(
+                    tooltip: '搜索',
+                    icon: const Icon(Icons.search_rounded),
+                    onPressed: () => Navigator.pushNamed(hCtx, '/search'),
+                  ),
+                  const SizedBox(width: 6),
+                ],
               ),
-            ),
-          ],
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
-              child: SectionHeader(title: '最新上架'),
-            ),
-          ),
-          SliverFillRemaining(
-            hasScrollBody: true,
-            child: _blocksLoading ? const SizedBox.shrink() : _grid,
-          ),
-        ],
+              // promote 分区（对齐 qt IndexView 分区横滑）
+              for (final block in _blocks) ...<Widget>[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                    child: SectionHeader(title: block.title),
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 218,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: block.bookList.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 10),
+                      itemBuilder: (_, i) => SizedBox(
+                        width: 118,
+                        child: AlbumCard(album: block.bookList[i]),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: SectionHeader(title: '最新上架'),
+                ),
+              ),
+            ],
+        body: _blocksLoading
+            ? const SizedBox.shrink()
+            // AlbumGrid 内部已有自己的 ScrollController + Bouncing 物理，
+            // 由 NestedScrollView 自动接管滚动手势传递。
+            : _grid,
       ),
     );
   }

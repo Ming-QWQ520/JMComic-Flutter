@@ -5,6 +5,11 @@ import '../../core/protocol/jm_api.dart';
 import '../../state/app_state.dart';
 
 /// 登录页（对齐 qt LoginReq2：POST /login）。
+///
+/// 用户反馈：登录界面只能用账号名 + 密码登录（不能用邮箱）；找回密码
+/// 只能通过邮箱，服务端会把新密码发到邮箱。两个入口分离：
+/// - 「登录」按钮：仅 username + password；
+/// - 「忘记密码」按钮：进入 [ForgotPasswordPage]，只填邮箱即可。
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -74,7 +79,8 @@ class _LoginPageState extends State<LoginPage> {
           TextField(
             controller: _user,
             decoration: const InputDecoration(
-              labelText: '用户名 / 邮箱',
+              // 仅显示「用户名」，不再含「/邮箱」
+              labelText: '用户名',
               prefixIcon: Icon(Icons.person_outline_rounded),
             ),
           ),
@@ -107,10 +113,26 @@ class _LoginPageState extends State<LoginPage> {
                 : const Text('登录'),
           ),
           const SizedBox(height: 8),
-          TextButton(
-            onPressed: () => Navigator.push(context,
-                MaterialPageRoute<void>(builder: (_) => const RegisterPage())),
-            child: const Text('没有账号？注册 / 忘记密码'),
+          // 「忘记密码」独立入口：进入只填邮箱的重置密码页。
+          // 不再把「注册 / 忘记密码」混在一个按钮里。
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: <Widget>[
+              TextButton(
+                onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                        builder: (_) => const RegisterPage())),
+                child: const Text('没有账号？注册'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute<void>(
+                        builder: (_) => const ForgotPasswordPage())),
+                child: const Text('忘记密码？'),
+              ),
+            ],
           ),
           const SizedBox(height: 18),
           Text(
@@ -120,6 +142,104 @@ class _LoginPageState extends State<LoginPage> {
                 .textTheme
                 .labelSmall
                 ?.copyWith(color: cs.outline),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 找回密码页（对齐 qt ResetPasswordReq：POST /lost）。
+///
+/// 用户反馈：找回密码只能用邮箱，服务端会把官方生成的随机新密码发到
+/// 邮箱。本页只接收邮箱字段，提交后提示用户去邮箱查看新密码。
+class ForgotPasswordPage extends StatefulWidget {
+  const ForgotPasswordPage({super.key});
+
+  @override
+  State<ForgotPasswordPage> createState() => _ForgotPasswordPageState();
+}
+
+class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  final TextEditingController _email = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _email.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final e = _email.text.trim();
+    if (e.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入邮箱')));
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      final (ok, msg) = await JmApi.instance.resetPassword(e);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(ok
+              ? '新密码已发送至邮箱，请查收后用新密码登录'
+              : '发送失败: $msg')));
+      if (ok) Navigator.pop(context);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('发送失败: $err')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('找回密码')),
+      body: ListView(
+        padding: const EdgeInsets.all(24),
+        children: <Widget>[
+          const SizedBox(height: 20),
+          Container(
+            width: 64,
+            height: 64,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: cs.primary.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(Icons.lock_reset_rounded, size: 32, color: cs.primary),
+          ),
+          const SizedBox(height: 22),
+          Text(
+            '请输入注册邮箱，官方将把新生成的随机密码发送至该邮箱。',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _email,
+            keyboardType: TextInputType.emailAddress,
+            decoration: const InputDecoration(
+              labelText: '注册邮箱',
+              prefixIcon: Icon(Icons.mail_outline_rounded),
+            ),
+          ),
+          const SizedBox(height: 22),
+          FilledButton(
+            onPressed: _loading ? null : _submit,
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            child: _loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Text('发送新密码'),
           ),
         ],
       ),

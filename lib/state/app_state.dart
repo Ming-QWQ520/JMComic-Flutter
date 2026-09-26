@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 
@@ -10,6 +11,7 @@ import '../core/protocol/models.dart';
 import '../services/download_manager.dart';
 import '../services/github_service.dart';
 import '../services/local_store.dart';
+import '../services/widget_bridge.dart';
 
 /// 阅读方向。
 enum ReadDirection { vertical, horizontal, rightToLeft }
@@ -187,6 +189,11 @@ class AppState extends ChangeNotifier {
     // 切后台再回到前台不会重新走 init()，符合"每次进入 APP 请求一次"的
     // 定义；失败静默（GitHub 在部分网络下不可达，不影响使用）。
     _fetchRepoStars();
+
+    // 桌面小组件数据同步：登录态（如有）+ 随机推荐一次。
+    unawaited(WidgetBridge.instance
+        .writeUserName(isLogged ? _user!.username : '未登录'));
+    unawaited(refreshWidgetRandomAlbum());
   }
 
   /// 拉取 GitHub 仓库 Star 数（fire-and-forget，失败保留 null）。
@@ -362,6 +369,8 @@ class AppState extends ChangeNotifier {
     await _store.setString('jwt', user.jwtToken);
     await _store.setString('avs', user.s);
     await _store.setJson('user', user.toMap());
+    // 同步用户名到桌面小组件（widget 显示「用户名」或「未登录」）
+    unawaited(WidgetBridge.instance.writeUserName(user.username));
   }
 
   /// 从服务端拉取最新用户信息并本地落盘（购买/签到后同步 J币等）。
@@ -392,5 +401,24 @@ class AppState extends ChangeNotifier {
     await _store.remove('jwt');
     await _store.remove('avs');
     await _store.remove('user');
+    // 同步退出状态到桌面小组件
+    unawaited(WidgetBridge.instance.writeUserName('未登录'));
+  }
+
+  /// 拉取一部随机推荐并写入桌面小组件（widget 显示封面/名称/JM号）。
+  /// 由 init() 末尾触发一次，用户在 widget 点「刷新」也会触发。
+  Future<void> refreshWidgetRandomAlbum() async {
+    try {
+      final list = await api.getRandomRecommend();
+      if (list.isEmpty) return;
+      final a = list.first;
+      unawaited(WidgetBridge.instance.writeRandomAlbum(
+        name: a.name,
+        id: a.id,
+        coverUrl: api.coverUrl(a.id),
+      ));
+    } catch (_) {
+      // 静默失败：widget 不应阻塞主流程
+    }
   }
 }

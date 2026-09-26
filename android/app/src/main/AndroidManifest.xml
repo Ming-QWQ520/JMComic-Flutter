@@ -37,7 +37,23 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 长按桌面图标快捷菜单：随机推荐 / 每周更新 -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- 桌面小组件：用户页 / 随机推荐（左右滑动切换） -->
+        <receiver
+            android:name=".JmHomeWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/jm_widget_info" />
+        </receiver>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

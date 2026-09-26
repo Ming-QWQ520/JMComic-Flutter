@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">JMComic-Flutter</string>
+    <!-- App shortcuts 长按图标菜单文案 -->
+    <string name="shortcut_random_label">随机推荐</string>
+    <string name="shortcut_random_long">随机推荐一部漫画</string>
+    <string name="shortcut_weekly_label">每周更新</string>
+    <string name="shortcut_weekly_long">查看本周更新</string>
+    <string name="shortcut_user_label">我的</string>
+    <string name="shortcut_user_long">打开个人主页</string>
+</resources>

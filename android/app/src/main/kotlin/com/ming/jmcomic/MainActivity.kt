@@ -8,10 +8,15 @@ import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StrictMode
+import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
+import android.widget.Toast
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -40,6 +45,15 @@ class MainActivity : FlutterActivity() {
 
     private var channel: MethodChannel? = null
     private var storageChannel: MethodChannel? = null
+
+    /// 双击退出：首次返回键弹 Toast 提示，2 秒内再按一次才真正退出。
+    /// 用户反馈要求：增加滑动第二次才会退出 APP。
+    private var lastBackPressTime: Long = 0
+    private val backPressHandler = Handler(Looper.getMainLooper())
+
+    /// 长按图标 shortcut / 桌面小组件点击跳转的 action extra
+    private var pendingJmAction: String? = null
+    private var pendingAlbumId: String? = null
 
     /// 音量键翻页开关（由 Flutter 侧控制，仅阅读器打开时为 true）
     @Volatile
@@ -97,6 +111,129 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        // Widget bridge channel：Flutter 端向 widget 推送用户名 / 随机推荐
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.ming.jmcomic/widget"
+        ).apply {
+            setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "writeUserName" -> {
+                        val name = call.argument<String>("name")
+                        JmHomeWidgetProvider.writeUserName(
+                            this@MainActivity, name
+                        )
+                        result.success(true)
+                    }
+                    "writeRandomAlbum" -> {
+                        val name = call.argument<String>("name") ?: ""
+                        val id = call.argument<String>("id") ?: ""
+                        val coverUrl = call.argument<String>("coverUrl") ?: ""
+                        JmHomeWidgetProvider.writeRandomAlbum(
+                            this@MainActivity, name, id, coverUrl
+                        )
+                        result.success(true)
+                    }
+                    "consumePendingAction" -> {
+                        // 取出 shortcut / widget 点击时缓存的 action，
+                        // 由 Flutter 端处理后清空
+                        val action = pendingJmAction
+                        val albumId = pendingAlbumId
+                        pendingJmAction = null
+                        pendingAlbumId = null
+                        val map = mutableMapOf<String, Any?>()
+                        map["action"] = action
+                        map["albumId"] = albumId
+                        result.success(map)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+        // 启动后如果有 shortcut / widget 跳转 action，发送到 Flutter
+        pendingJmAction?.let { dispatchActionToFlutter(it, pendingAlbumId) }
+    }
+
+    /// 把 shortcut / widget 跳转 action 通过 method channel 同步到 Flutter。
+    /// Flutter 端在 main.dart 监听该方法调用并导航到对应页面。
+    private fun dispatchActionToFlutter(action: String, albumId: String?) {
+        backPressHandler.post {
+            channel?.invokeMethod(
+                "jm_action",
+                mapOf(
+                    "action" to action,
+                    "albumId" to (albumId ?: "")
+                )
+            )
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 解析 shortcut / widget 跳转 intent 的 extra
+        intent?.let { i ->
+            val a = i.getStringExtra("jm_action")
+            if (a != null) {
+                pendingJmAction = a
+                pendingAlbumId = i.getStringExtra("album_id")
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // App 在后台时通过 shortcut 跳转会走 onNewIntent
+        val action = intent.getStringExtra("jm_action")
+        if (action != null) {
+            val albumId = intent.getStringExtra("album_id")
+            dispatchActionToFlutter(action, albumId)
+        }
+        setIntent(intent)
+    }
+
+    /// 双击返回退出：用户在主页按返回键时，首次提示"再按一次退出"，
+    /// 2 秒内再按一次才真正 finish()。在非主页（阅读器/详情页）按返回
+    /// 由 Flutter Navigator 处理，不进入此逻辑。
+    override fun onBackPressed() {
+        // 让 Flutter 优先处理（路由栈非空时由 Navigator pop）
+        // 这里通过 channel 询问 Flutter 是否在根路由
+        channel?.invokeMethod("isAtRoot", null, object : MethodChannel.Result {
+            override fun success(result: Any?) {
+                val atRoot = (result as? Boolean) == true
+                if (atRoot) {
+                    // 在根路由，启用双击退出
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastBackPressTime < 2000) {
+                        lastBackPressTime = 0
+                        finishAffinity()
+                    } else {
+                        lastBackPressTime = now
+                        Toast.makeText(
+                            this@MainActivity,
+                            "再按一次退出",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                } else {
+                    // 非根路由：交给 Flutter 处理
+                    this@MainActivity.superOnBackPressed()
+                }
+            }
+
+            override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                // Flutter 未实现 isAtRoot，直接走默认 back
+                this@MainActivity.superOnBackPressed()
+            }
+
+            override fun notImplemented() {
+                this@MainActivity.superOnBackPressed()
+            }
+        })
+    }
+
+    private fun superOnBackPressed() {
+        @Suppress("DEPRECATION")
+        super.onBackPressed()
     }
 
     // ------------------------------------------------------------------
