@@ -126,7 +126,7 @@ class JmHomeWidgetProvider : AppWidgetProvider() {
             )
             views.setTextViewText(R.id.albumJmId, "JM: $albumId")
             // 磁盘缓存命中直接给图，未命中后台下载（成功后重绘）
-            if (albumId.isNotEmpty) {
+            if (albumId.isNotEmpty()) {
                 val bmp = JmWidgetApi.peekCoverBitmap(context, albumId)
                 if (bmp != null) {
                     views.setImageViewBitmap(R.id.albumCover, bmp)
