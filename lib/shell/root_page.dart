@@ -17,18 +17,44 @@ class RootPage extends StatefulWidget {
 
 class _RootPageState extends State<RootPage> {
   int _index = 0;
+  // 关键修复：此前用 IndexedStack 仅靠点击底栏切换，左右滑动无法切页。
+  // 改为 PageView + PageController：左右滑动手势触发 onPageChanged → 同步
+  // _index → 底栏高亮跟随。点击底栏 → _pageController.jumpToPage → 滚动
+  // 到对应页 + setState 更新 _index。HomePage 的横滑 ListView 与
+  // PageView 的横滑手势会进入 gesture arena 竞争：起点在 ListView 上
+  // 时由 ListView 赢得（按分区滚动），起点在空白处由 PageView 赢得
+  // （切换页面），符合常见 App 直觉。
+  late final PageController _pageController =
+      PageController(initialPage: _index);
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _switchTo(int i) {
+    if (i == _index) return;
+    setState(() => _index = i);
+    // jumpToPage 不会触发 onPageChanged（避免 setState 双调用），
+    // 故在此主动 setState 后再跳转。
+    _pageController.jumpToPage(i);
+  }
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final hasBg = context.watch<AppState>().hasCustomBackground;
-    // 底部导航栏始终显示。此前“键盘弹起隐藏底栏”的 hack 依赖
+    // 底部导航栏始终显示。此前"键盘弹起隐藏底栏"的 hack 依赖
     // MediaQuery.viewInsets，在部分机型（如 vivo edge-to-edge）上
-    // 会残留幽灵 insets 导致底栏永久消失，表现为“底部导航栏无法
-    // 正常显示”。键盘顶起的问题交由 Scaffold 默认行为处理即可。
+    // 会残留幽灵 insets 导致底栏永久消失，表现为"底部导航栏无法
+    // 正常显示"。键盘顶起的问题交由 Scaffold 默认行为处理即可。
     return Scaffold(
-      body: IndexedStack(
-        index: _index,
+      body: PageView(
+        controller: _pageController,
+        // 物理效果保持默认 PageScrollPhysics（带阻尼/回弹），
+        // 桌面端 AppScrollBehavior 已把鼠标纳入 dragDevices。
+        onPageChanged: (int i) => setState(() => _index = i),
         children: const <Widget>[
           HomePage(),
           CategoryPage(),
@@ -49,7 +75,7 @@ class _RootPageState extends State<RootPage> {
         ),
         child: NavigationBar(
           selectedIndex: _index,
-          onDestinationSelected: (int i) => setState(() => _index = i),
+          onDestinationSelected: _switchTo,
           // 自定义背景下底栏轻微透出背景图（保持可读性的半透明）。
           backgroundColor:
               hasBg ? cs.surface.withValues(alpha: 0.86) : cs.surface,

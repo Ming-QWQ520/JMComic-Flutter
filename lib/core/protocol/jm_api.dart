@@ -32,6 +32,9 @@ class JmApi {
     final data = LoginData.fromMapSafe(r.data);
     if (data == null) throw JmApiException(0, '登录响应解析失败');
     final avs = r.cookies['AVS'] ?? '';
+    // 合并登录响应中的所有 cookies 到 sessionCookies，保证后续请求
+    // 携带最新的会话标识（对齐 jmcomic python self['cookies'] = cookies）。
+    _c.mergeCookies(r.cookies);
     if (data.jwtToken.isNotEmpty || avs.isNotEmpty) {
       _c.setAuth(data.jwtToken, avs.isNotEmpty ? avs : data.s);
     }

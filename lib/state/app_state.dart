@@ -76,6 +76,14 @@ class AppState extends ChangeNotifier {
   double _backgroundOpacity = 0.5;
   double get backgroundOpacity => _backgroundOpacity;
 
+  /// 选项透明度（0.0~1.0，默认 1.0 完全不透明）。
+  ///
+  /// 与背景透明度独立：背景透明度控制自定义壁纸透出程度，
+  /// 选项透明度控制前景 UI 元素（卡片/底栏/列表项）的半透明程度，
+  /// 用于在背景图较亮时降低前景 UI 的视觉权重以突出背景。
+  double _cardOpacity = 1.0;
+  double get cardOpacity => _cardOpacity;
+
   // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
   int? _repoStars;
   int? get repoStars => _repoStars;
@@ -128,6 +136,10 @@ class AppState extends ChangeNotifier {
       // 限制范围 [0.0, 1.0]
       if (_backgroundOpacity < 0) _backgroundOpacity = 0;
       if (_backgroundOpacity > 1) _backgroundOpacity = 1;
+      // 选项透明度：默认 1.0（完全不透明），老用户未设置时也是 1.0。
+      _cardOpacity = await _store.getInt('card_opacity', 100) / 100.0;
+      if (_cardOpacity < 0) _cardOpacity = 0;
+      if (_cardOpacity > 1) _cardOpacity = 1;
       if (_backgroundPath.isNotEmpty && !File(_backgroundPath).existsSync()) {
         // 背景图文件已被删除/清理：静默回落默认背景。
         _backgroundPath = '';
@@ -295,6 +307,13 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     // 持久化为整数百分比（0~100），避免 SharedPreferences 存浮点带来的精度漂移。
     await _store.setInt('background_opacity', (_backgroundOpacity * 100).round());
+  }
+
+  /// 设置选项透明度（0.0~1.0）。
+  Future<void> setCardOpacity(double v) async {
+    _cardOpacity = v.clamp(0.0, 1.0);
+    notifyListeners();
+    await _store.setInt('card_opacity', (_cardOpacity * 100).round());
   }
 
   /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。

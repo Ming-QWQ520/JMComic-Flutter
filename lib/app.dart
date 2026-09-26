@@ -44,8 +44,8 @@ class JmComicApp extends StatelessWidget {
         final hasBg = state.hasCustomBackground;
         return MaterialApp(
           title: 'JMComic-Flutter',
-          theme: AppTheme.light(scheme, hasBg),
-          darkTheme: AppTheme.dark(scheme, hasBg),
+          theme: AppTheme.light(scheme, hasBg, state.cardOpacity),
+          darkTheme: AppTheme.dark(scheme, hasBg, state.cardOpacity),
           themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
           debugShowCheckedModeBanner: false,
           scrollBehavior: const AppScrollBehavior(),

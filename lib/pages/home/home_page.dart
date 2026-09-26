@@ -71,11 +71,15 @@ class _HomePageState extends State<HomePage>
         slivers: <Widget>[
           SliverAppBar(
             pinned: true,
-            expandedHeight: 118,
-            collapsedHeight: 64,
-            toolbarHeight: 64,
+            // 顶部「发现」字样与右侧操作图标整体上移：压缩展开/收起高度
+            // 与 titlePadding.bottom，让标题更贴近顶部状态栏，配合
+            // 状态栏区域留白更紧凑，避免之前标题位置偏下造成的视觉
+            // 头重脚轻。原 118/64/64 → 96/56/56，padding bottom 14 → 8。
+            expandedHeight: 96,
+            collapsedHeight: 56,
+            toolbarHeight: 56,
             flexibleSpace: FlexibleSpaceBar(
-              titlePadding: const EdgeInsets.only(left: 20, bottom: 14),
+              titlePadding: const EdgeInsets.only(left: 20, bottom: 8),
               centerTitle: false,
               title: Text(
                 '发现',
@@ -106,7 +110,7 @@ class _HomePageState extends State<HomePage>
           for (final block in _blocks) ...<Widget>[
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
                 child: SectionHeader(title: block.title),
               ),
             ),
@@ -128,7 +132,7 @@ class _HomePageState extends State<HomePage>
           ],
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 4),
               child: SectionHeader(title: '最新上架'),
             ),
           ),

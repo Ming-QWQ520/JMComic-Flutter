@@ -167,12 +167,32 @@ class MainActivity : FlutterActivity() {
             Intent.FLAG_GRANT_READ_URI_PERMISSION
         val fileUri = Uri.fromFile(dir)
 
-        // 主意图：SAF content:// 目录 URI。系统"文件管理 / Files / 显示文件"
-        // 以及支持 content 目录的应用都能直接定位到该文件夹。
-        // 此前主意图是 file:// + resource/directory，多数 ROM 的系统
-        // 文件管理器不响应，选择器里只剩极少数应用（用户反馈
-        // "未包含显示文件/MT管理器打开"），这是根因。
-        val primary: Intent? = try {
+        // 关键修复：此前主意图是 SAF content:// URI + MIME_TYPE_DIR，
+        // 多数 ROM 的系统文件管理器不响应（包括 MT 管理器等第三方），
+        // chooser 不弹或只显示一两个应用。
+        //
+        // 现在主意图改为 file:// + MIME_TYPE_DIR，最大化命中所有
+        // 注册了「查看目录」意图过滤器的应用（系统文件、MT 管理器、
+        // Solid Explorer、FX、小米文件管理 等），chooser 会列全。
+        val primary = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(fileUri, android.provider.DocumentsContract.Document.MIME_TYPE_DIR)
+            addFlags(flags)
+        }
+
+        // 备选意图（EXTRA_INITIAL_INTENTS）：与主意图不同的 MIME 变体，
+        // 兼容注册了旧 MIME（resource/folder 等）的应用，全部出现在
+        // 同一个 chooser 中。SAF content:// URI 也作为备选注入，让
+        // 系统「文件」应用也能定位到该目录。
+        val extras = mutableListOf<Intent>()
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(fileUri, "resource/folder")
+            addFlags(flags)
+        }.also { extras.add(it) }
+        Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(fileUri, "resource/directory")
+            addFlags(flags)
+        }.also { extras.add(it) }
+        try {
             toSafInitialUri(path)?.let { docId ->
                 Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(
@@ -184,58 +204,24 @@ class MainActivity : FlutterActivity() {
                         android.provider.DocumentsContract.Document.MIME_TYPE_DIR
                     )
                     addFlags(flags)
-                }
+                }.also { extras.add(it) }
             }
         } catch (_: Exception) {
-            null
         }
 
-        // 备选意图：file:// 各 MIME 变体。MT 管理器等第三方文件管理器
-        // 注册的是 file:// + resource/directory（/ resource/folder /
-        // vnd.android.document/directory），放进 EXTRA_INITIAL_INTENTS
-        // 会与主意图的处理程序一并出现在系统选择器中。
-        val extras = listOf(
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, "resource/directory")
-                addFlags(flags)
-            },
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, "resource/folder")
-                addFlags(flags)
-            },
-            Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(fileUri, "vnd.android.document/directory")
-                addFlags(flags)
-            }
-        )
-
-        if (primary != null) {
-            val chooser = Intent.createChooser(primary, "打开文件夹").apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val chooser = Intent.createChooser(primary, "打开文件夹").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (extras.isNotEmpty()) {
                 putExtra(Intent.EXTRA_INITIAL_INTENTS, extras.toTypedArray())
             }
-            try {
-                startActivity(chooser)
-                return true
-            } catch (_: Exception) {
-            }
-        }
-
-        // 兜底 1：仅 file:// 意图交给选择器（SAF URI 构建失败时）。
-        val fileChooser = Intent.createChooser(extras[0], "打开文件夹").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(
-                Intent.EXTRA_INITIAL_INTENTS,
-                extras.drop(1).toTypedArray()
-            )
         }
         try {
-            startActivity(fileChooser)
+            startActivity(chooser)
             return true
         } catch (_: Exception) {
         }
 
-        // 兜底 2：SAF 目录选择器，直接定位到下载目录
+        // 兜底 1：SAF 目录选择器，直接定位到下载目录
         //（Android 8+ 支持 EXTRA_INITIAL_URI 初始位置提示）。
         try {
             val saf = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
@@ -258,7 +244,7 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // 兜底 3：打开系统"下载"管理器
+        // 兜底 2：打开系统"下载"管理器
         return try {
             startActivity(
                 Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
