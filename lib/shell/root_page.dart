@@ -5,6 +5,7 @@ import '../pages/explore/category_page.dart';
 import '../pages/home/home_page.dart';
 import '../pages/search/search_page.dart';
 import '../pages/user/profile_page.dart';
+import '../services/widget_bridge.dart';
 import '../state/app_state.dart';
 
 /// 根导航壳：首页 / 分类 / 搜索 / 我的。
@@ -64,7 +65,13 @@ class _RootPageState extends State<RootPage> {
         controller: _pageController,
         // 物理效果保持默认 PageScrollPhysics（带阻尼/回弹），
         // 桌面端 AppScrollBehavior 已把鼠标纳入 dragDevices。
-        onPageChanged: (int i) => setState(() => _index = i),
+        onPageChanged: (int i) {
+          setState(() => _index = i);
+          // 同步给 Android 原生用于双击退出判断：根路由（index 任意
+          // 都算根，因为 RootPage 自身就是根；非根路由由 push 进来
+          // 的详情/阅读器页面占据）
+          WidgetBridge.instance.isAtRoot = true;
+        },
         children: const <Widget>[
           HomePage(),
           CategoryPage(),

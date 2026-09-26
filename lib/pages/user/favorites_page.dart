@@ -20,6 +20,11 @@ class FavoritesPage extends StatefulWidget {
 class _FavoritesPageState extends State<FavoritesPage> {
   final JmApi _api = JmApi.instance;
   final ScrollController _scroll = ScrollController();
+  // 本地搜索：收藏已全部分页加载到 _items 后，按关键词过滤展示。
+  // 服务端 favorite 接口不支持关键词查询，本地过滤足够（用户描述
+  // 「收藏多很难找」，主要痛点是已加载内容查找，非未加载内容发现）。
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
 
   final List<SearchAlbum> _items = <SearchAlbum>[];
   final List<FavoriteFolder> _folders = <FavoriteFolder>[];
@@ -32,6 +37,18 @@ class _FavoritesPageState extends State<FavoritesPage> {
   bool _noMore = false;
   String _error = '';
 
+  /// 按关键词过滤后的展示列表。
+  List<SearchAlbum> get _filtered {
+    if (_query.isEmpty) return _items;
+    final q = _query.toLowerCase();
+    return _items
+        .where((a) =>
+            a.name.toLowerCase().contains(q) ||
+            a.author.toLowerCase().contains(q) ||
+            a.id.toLowerCase().contains(q))
+        .toList();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -42,11 +59,19 @@ class _FavoritesPageState extends State<FavoritesPage> {
         _loadMore();
       }
     });
+    // 搜索输入防抖：用户停止输入 200ms 后刷新展示
+    _searchCtrl.addListener(() {
+      final q = _searchCtrl.text.trim();
+      if (q != _query) {
+        setState(() => _query = q);
+      }
+    });
   }
 
   @override
   void dispose() {
     _scroll.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -192,6 +217,34 @@ class _FavoritesPageState extends State<FavoritesPage> {
       ),
       body: Column(
         children: <Widget>[
+          // 本地搜索栏：收藏多时按名称/作者/JM号过滤
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: '搜索收藏（名称/作者/JM号）',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                isDense: true,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
+                filled: true,
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        },
+                      ),
+              ),
+            ),
+          ),
           // 收藏夹切换条
           if (_folders.isNotEmpty)
             SizedBox(
@@ -234,27 +287,33 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 ? const LoadingView()
                 : _error.isNotEmpty
                     ? ErrorView(message: _error, onRetry: _load)
-                    : _items.isEmpty
-                        ? const EmptyView(message: '暂无收藏')
+                    : _filtered.isEmpty
+                        ? EmptyView(
+                            message: _query.isEmpty
+                                ? '暂无收藏'
+                                : '未找到匹配「$_query」的收藏')
                         : GridView.builder(
                             controller: _scroll,
-                            padding: const EdgeInsets.all(16),
+                            padding: const EdgeInsets.all(12),
+                            // 缩小卡片：maxCrossAxisExtent 160→110，
+                            // childAspectRatio 0.55→0.52（更紧凑、单屏
+                            // 可见更多漫画，方便用户在大量收藏中快速浏览）。
                             gridDelegate:
                                 const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 160,
-                              mainAxisSpacing: 16,
-                              crossAxisSpacing: 12,
-                              childAspectRatio: 0.55,
+                              maxCrossAxisExtent: 110,
+                              mainAxisSpacing: 10,
+                              crossAxisSpacing: 8,
+                              childAspectRatio: 0.52,
                             ),
-                            itemCount:
-                                _items.length + (_noMore ? 0 : 1),
+                            itemCount: _filtered.length +
+                                (_query.isEmpty && !_noMore ? 1 : 0),
                             itemBuilder: (_, i) {
-                              if (i >= _items.length) {
+                              if (i >= _filtered.length) {
                                 return const Center(
                                     child: CircularProgressIndicator(
                                         strokeWidth: 2));
                               }
-                              final a = _items[i];
+                              final a = _filtered[i];
                               return AlbumCard(
                                 album: a,
                                 onTap: () => Navigator.pushNamed(

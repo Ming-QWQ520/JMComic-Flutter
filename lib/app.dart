@@ -7,12 +7,14 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
+import 'main.dart';
 import 'pages/album/album_detail_page.dart';
 import 'pages/download/local_reader_page.dart';
 import 'pages/home/week_page.dart';
 import 'pages/reader/reader_page.dart';
 import 'pages/search/search_page.dart';
 import 'pages/user/login_page.dart';
+import 'services/widget_bridge.dart';
 import 'shell/root_page.dart';
 import 'state/app_state.dart';
 
@@ -43,6 +45,7 @@ class JmComicApp extends StatelessWidget {
         final scheme = state.scheme;
         final hasBg = state.hasCustomBackground;
         return MaterialApp(
+          navigatorKey: rootNavigatorKey,
           title: 'JMComic-Flutter',
           theme: AppTheme.light(scheme, hasBg, state.cardOpacity),
           darkTheme: AppTheme.dark(scheme, hasBg, state.cardOpacity),
@@ -96,6 +99,10 @@ class JmComicApp extends StatelessWidget {
             );
           },
           onGenerateRoute: (RouteSettings settings) {
+            // 任何 pushNamed 都意味着离开根路由（RootPage 的 4 个 tab），
+            // 同步给 Android 原生用于双击退出判断。
+            // pop 时由 _RootObserver.didPop 自动恢复 isAtRoot=true。
+            WidgetBridge.instance.isAtRoot = false;
             switch (settings.name) {
               case '/album':
                 return SlideRightRoute<void>(
@@ -121,7 +128,8 @@ class JmComicApp extends StatelessWidget {
                 final q = settings.arguments;
                 return SlideRightRoute<void>(
                   settings: settings,
-                  builder: (_) => SearchPage(initialQuery: q is String ? q : ''),
+                  builder: (_) =>
+                      SearchPage(initialQuery: q is String ? q : ''),
                 );
               case '/login':
                 // 详情页/评论页未登录时 pushNamed('/login')。
@@ -138,9 +146,41 @@ class JmComicApp extends StatelessWidget {
                 );
             }
           },
+          // 监听路由变化以同步 isAtRoot：路由栈只剩 1 项时（RootPage）
+          // isAtRoot=true，否则 false。用于 Android 双击退出判断。
+          navigatorObservers: <NavigatorObserver>[_RootObserver()],
         );
       },
     );
+  }
+}
+
+/// 监听根 Navigator 的 push/pop，自动同步 WidgetBridge.isAtRoot。
+/// didPush 后检查栈深度；didPop 后同样检查。栈深度 ≤1 即在根路由。
+class _RootObserver extends NavigatorObserver {
+  void _sync(NavigatorState? nav) {
+    if (nav == null) return;
+    WidgetBridge.instance.isAtRoot = nav.canPop() == false;
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(navigator);
+  }
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(navigator);
+  }
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _sync(navigator);
+  }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _sync(navigator);
   }
 }
 
