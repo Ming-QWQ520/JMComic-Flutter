@@ -1,0 +1,467 @@
+﻿2026-09-26T15:06:06.1104858Z Current runner version: '2.337.0'
+2026-09-26T15:06:06.1131516Z ##[group]Runner Image Provisioner
+2026-09-26T15:06:06.1132569Z Hosted Compute Agent
+2026-09-26T15:06:06.1133195Z Version: 20260828.587
+2026-09-26T15:06:06.1134236Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-26T15:06:06.1135002Z Build Date: 2026-08-28T16:44:25Z
+2026-09-26T15:06:06.1135715Z Worker ID: {15d53f9a-833c-4ff2-9b72-0661d13ff5da}
+2026-09-26T15:06:06.1136434Z Azure Region: westus
+2026-09-26T15:06:06.1137020Z ##[endgroup]
+2026-09-26T15:06:06.1139150Z ##[group]Operating System
+2026-09-26T15:06:06.1139876Z Ubuntu
+2026-09-26T15:06:06.1140390Z 24.04.5
+2026-09-26T15:06:06.1140996Z LTS
+2026-09-26T15:06:06.1141536Z ##[endgroup]
+2026-09-26T15:06:06.1142167Z ##[group]Runner Image
+2026-09-26T15:06:06.1142767Z Image: ubuntu-24.04
+2026-09-26T15:06:06.1143304Z Version: 20260920.314.1
+2026-09-26T15:06:06.1144642Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-26T15:06:06.1146227Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+2026-09-26T15:06:06.1147216Z ##[endgroup]
+2026-09-26T15:06:06.1148770Z ##[group]GITHUB_TOKEN Permissions
+2026-09-26T15:06:06.1150997Z Contents: write
+2026-09-26T15:06:06.1151601Z Metadata: read
+2026-09-26T15:06:06.1152258Z ##[endgroup]
+2026-09-26T15:06:06.1154348Z Secret source: Actions
+2026-09-26T15:06:06.1155436Z Cache mode: write
+2026-09-26T15:06:06.1156178Z Prepare workflow directory
+2026-09-26T15:06:06.1522666Z Prepare all required actions
+2026-09-26T15:06:06.1598378Z Getting action download info
+2026-09-26T15:06:06.5805522Z Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+2026-09-26T15:06:06.6947258Z Download action repository 'actions/setup-java@v4' (SHA:cf277c60eb25467037889841efdb72551f06f6c3)
+2026-09-26T15:06:07.2275025Z Download action repository 'subosito/flutter-action@v2' (SHA:1a449444c387b1966244ae4d4f8c696479add0b2)
+2026-09-26T15:06:07.4702078Z Download action repository 'actions/cache@v4' (SHA:0057852bfaa89a56745cba8c7296529d2fc39830)
+2026-09-26T15:06:07.6158521Z Download action repository 'actions/upload-artifact@v4' (SHA:ea165f8d65b6e75b540449e92b4886f43607fa02)
+2026-09-26T15:06:07.7252619Z Download action repository 'softprops/action-gh-release@v2' (SHA:3bb12739c298aeb8a4eeaf626c5b8d85266b0e65)
+2026-09-26T15:06:08.1503822Z Getting action download info
+2026-09-26T15:06:08.3036757Z Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+2026-09-26T15:06:08.5443051Z Complete job name: Build Android (APK)
+2026-09-26T15:06:08.6185112Z ##[group]Run actions/checkout@v4
+2026-09-26T15:06:08.6185768Z with:
+2026-09-26T15:06:08.6186061Z   repository: Ming-QWQ520/JMComic-Flutter
+2026-09-26T15:06:08.6188740Z   token: ***
+2026-09-26T15:06:08.6189065Z   ssh-strict: true
+2026-09-26T15:06:08.6189332Z   ssh-user: git
+2026-09-26T15:06:08.6189594Z   persist-credentials: true
+2026-09-26T15:06:08.6189888Z   clean: true
+2026-09-26T15:06:08.6190181Z   sparse-checkout-cone-mode: true
+2026-09-26T15:06:08.6190488Z   fetch-depth: 1
+2026-09-26T15:06:08.6190743Z   fetch-tags: false
+2026-09-26T15:06:08.6191008Z   show-progress: true
+2026-09-26T15:06:08.6191270Z   lfs: false
+2026-09-26T15:06:08.6191504Z   submodules: false
+2026-09-26T15:06:08.6191761Z   set-safe-directory: true
+2026-09-26T15:06:08.6192065Z   allow-unsafe-pr-checkout: false
+2026-09-26T15:06:08.6192636Z ##[endgroup]
+2026-09-26T15:06:08.7232224Z Syncing repository: Ming-QWQ520/JMComic-Flutter
+2026-09-26T15:06:08.7234252Z ##[group]Getting Git version info
+2026-09-26T15:06:08.7235097Z Working directory is '/home/runner/work/JMComic-Flutter/JMComic-Flutter'
+2026-09-26T15:06:08.7236209Z [command]/usr/bin/git version
+2026-09-26T15:06:08.7307742Z git version 2.55.0
+2026-09-26T15:06:08.7340791Z ##[endgroup]
+2026-09-26T15:06:08.7355790Z Temporarily overriding HOME='/home/runner/work/_temp/9b3a6d5f-63c6-48b0-9876-5fa60153e84f' before making global git config changes
+2026-09-26T15:06:08.7359017Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-26T15:06:08.7360504Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/JMComic-Flutter/JMComic-Flutter
+2026-09-26T15:06:08.7409425Z Deleting the contents of '/home/runner/work/JMComic-Flutter/JMComic-Flutter'
+2026-09-26T15:06:08.7417328Z ##[group]Initializing the repository
+2026-09-26T15:06:08.7428683Z [command]/usr/bin/git init /home/runner/work/JMComic-Flutter/JMComic-Flutter
+2026-09-26T15:06:08.7534676Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-26T15:06:08.7535832Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-26T15:06:08.7536721Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-26T15:06:08.7537188Z hint: call:
+2026-09-26T15:06:08.7537425Z hint:
+2026-09-26T15:06:08.7537767Z hint: 	git config --global init.defaultBranch <name>
+2026-09-26T15:06:08.7538610Z hint:
+2026-09-26T15:06:08.7538976Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-26T15:06:08.7539552Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-26T15:06:08.7539984Z hint:
+2026-09-26T15:06:08.7540397Z hint: 	git branch -m <name>
+2026-09-26T15:06:08.7540715Z hint:
+2026-09-26T15:06:08.7541092Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-26T15:06:08.7546551Z Initialized empty Git repository in /home/runner/work/JMComic-Flutter/JMComic-Flutter/.git/
+2026-09-26T15:06:08.7556684Z [command]/usr/bin/git remote add origin https://github.com/Ming-QWQ520/JMComic-Flutter
+2026-09-26T15:06:08.7610786Z ##[endgroup]
+2026-09-26T15:06:08.7611611Z ##[group]Disabling automatic garbage collection
+2026-09-26T15:06:08.7619559Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-26T15:06:08.7657374Z ##[endgroup]
+2026-09-26T15:06:08.7658375Z ##[group]Setting up auth
+2026-09-26T15:06:08.7659101Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-26T15:06:08.7691318Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-26T15:06:08.8091177Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-26T15:06:08.8132289Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-26T15:06:08.8360357Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-26T15:06:08.8398488Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-26T15:06:08.8626409Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-26T15:06:08.8667216Z ##[endgroup]
+2026-09-26T15:06:08.8668546Z ##[group]Fetching the repository
+2026-09-26T15:06:08.8678125Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +276f0307dbaa65f5319b3812dc01acb598eec7b2:refs/remotes/origin/main
+2026-09-26T15:06:09.5740949Z From https://github.com/Ming-QWQ520/JMComic-Flutter
+2026-09-26T15:06:09.5741661Z  * [new ref]         276f0307dbaa65f5319b3812dc01acb598eec7b2 -> origin/main
+2026-09-26T15:06:09.5754474Z ##[endgroup]
+2026-09-26T15:06:09.5755019Z ##[group]Determining the checkout info
+2026-09-26T15:06:09.5755543Z ##[endgroup]
+2026-09-26T15:06:09.5756981Z [command]/usr/bin/git sparse-checkout disable
+2026-09-26T15:06:09.5815359Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-26T15:06:09.5850546Z ##[group]Checking out the ref
+2026-09-26T15:06:09.5856266Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-09-26T15:06:09.6043649Z Switched to a new branch 'main'
+2026-09-26T15:06:09.6049213Z branch 'main' set up to track 'origin/main'.
+2026-09-26T15:06:09.6087710Z ##[endgroup]
+2026-09-26T15:06:09.6133918Z [command]/usr/bin/git log -1 --format=%H
+2026-09-26T15:06:09.6162406Z 276f0307dbaa65f5319b3812dc01acb598eec7b2
+2026-09-26T15:06:09.6452302Z ##[group]Run actions/setup-java@v4
+2026-09-26T15:06:09.6452665Z with:
+2026-09-26T15:06:09.6452924Z   distribution: temurin
+2026-09-26T15:06:09.6453199Z   java-version: 21
+2026-09-26T15:06:09.6453452Z   java-package: jdk
+2026-09-26T15:06:09.6453716Z   check-latest: false
+2026-09-26T15:06:09.6453978Z   server-id: github
+2026-09-26T15:06:09.6454241Z   server-username: GITHUB_ACTOR
+2026-09-26T15:06:09.6454549Z   server-password: GITHUB_TOKEN
+2026-09-26T15:06:09.6454843Z   overwrite-settings: true
+2026-09-26T15:06:09.6455126Z   job-status: success
+2026-09-26T15:06:09.6457512Z   token: ***
+2026-09-26T15:06:09.6457777Z ##[endgroup]
+2026-09-26T15:06:09.8224081Z ##[warning]setup-java v4 is deprecated and will no longer receive updates. Please migrate to actions/setup-java@v5.
+2026-09-26T15:06:09.8235865Z ##[group]Installed distributions
+2026-09-26T15:06:09.8399803Z Resolved Java 21.0.12+1 from tool-cache
+2026-09-26T15:06:09.8400409Z Setting Java 21.0.12+1 as the default
+2026-09-26T15:06:09.8410914Z (node:2269) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-26T15:06:09.8411773Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-26T15:06:09.8415254Z Creating toolchains.xml for JDK version 21 from temurin
+2026-09-26T15:06:09.8497739Z Writing to /home/runner/.m2/toolchains.xml
+2026-09-26T15:06:09.8498630Z 
+2026-09-26T15:06:09.8498833Z Java configuration:
+2026-09-26T15:06:09.8499260Z   Distribution: temurin
+2026-09-26T15:06:09.8499720Z   Version: 21.0.12+1
+2026-09-26T15:06:09.8543029Z   Path: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.8543562Z 
+2026-09-26T15:06:09.8544171Z ##[endgroup]
+2026-09-26T15:06:09.8565258Z Creating settings.xml with server-id: github
+2026-09-26T15:06:09.8566024Z Writing to /home/runner/.m2/settings.xml
+2026-09-26T15:06:09.8939965Z ##[group]Run subosito/flutter-action@v2
+2026-09-26T15:06:09.8940513Z with:
+2026-09-26T15:06:09.8940847Z   flutter-version: 3.47.5
+2026-09-26T15:06:09.8941231Z   channel: stable
+2026-09-26T15:06:09.8941565Z   cache: true
+2026-09-26T15:06:09.8941890Z   architecture: X64
+2026-09-26T15:06:09.8942263Z   pub-cache-path: default
+2026-09-26T15:06:09.8942643Z   dry-run: false
+2026-09-26T15:06:09.8943098Z   git-source: https://github.com/flutter/flutter.git
+2026-09-26T15:06:09.8943608Z env:
+2026-09-26T15:06:09.8944095Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.8944990Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.8945675Z ##[endgroup]
+2026-09-26T15:06:09.9009121Z ##[start-action display=Make yq tool available on Windows runners;id=__subosito_flutter-action.__run]
+2026-09-26T15:06:09.9020989Z ##[end-action id=__subosito_flutter-action.__run;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-26T15:06:09.9023312Z ##[start-action display=Make setup script executable;id=__subosito_flutter-action.__run_2]
+2026-09-26T15:06:09.9060844Z ##[group]Run chmod +x "$GITHUB_ACTION_PATH/setup.sh"
+2026-09-26T15:06:09.9061276Z [36;1mchmod +x "$GITHUB_ACTION_PATH/setup.sh"[0m
+2026-09-26T15:06:09.9334749Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-26T15:06:09.9335230Z env:
+2026-09-26T15:06:09.9335623Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.9336279Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.9336779Z ##[endgroup]
+2026-09-26T15:06:09.9471893Z ##[end-action id=__subosito_flutter-action.__run_2;outcome=success;conclusion=success;duration_ms=44]
+2026-09-26T15:06:09.9474647Z ##[start-action display=Set action inputs;id=__subosito_flutter-action.flutter-action]
+2026-09-26T15:06:09.9515207Z ##[group]Run $GITHUB_ACTION_PATH/setup.sh -p \
+2026-09-26T15:06:09.9515620Z [36;1m$GITHUB_ACTION_PATH/setup.sh -p \[0m
+2026-09-26T15:06:09.9515931Z [36;1m  -n '3.47.5' \[0m
+2026-09-26T15:06:09.9516165Z [36;1m  -f '' \[0m
+2026-09-26T15:06:09.9516375Z [36;1m  -a 'X64' \[0m
+2026-09-26T15:06:09.9516588Z [36;1m  -k '' \[0m
+2026-09-26T15:06:09.9516778Z [36;1m  -c '' \[0m
+2026-09-26T15:06:09.9516968Z [36;1m  -l '' \[0m
+2026-09-26T15:06:09.9517168Z [36;1m  -d 'default' \[0m
+2026-09-26T15:06:09.9517479Z [36;1m  -g 'https://github.com/flutter/flutter.git' \[0m
+2026-09-26T15:06:09.9517808Z [36;1m  stable[0m
+2026-09-26T15:06:09.9579061Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-26T15:06:09.9579420Z env:
+2026-09-26T15:06:09.9579732Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.9580230Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:09.9580627Z ##[endgroup]
+2026-09-26T15:06:10.1370696Z ##[end-action id=__subosito_flutter-action.flutter-action;outcome=success;conclusion=success;duration_ms=189]
+2026-09-26T15:06:10.1375956Z ##[start-action display=Cache Flutter;id=__subosito_flutter-action.cache-flutter]
+2026-09-26T15:06:10.1428496Z ##[group]Run actions/cache@v5
+2026-09-26T15:06:10.1428781Z with:
+2026-09-26T15:06:10.1429048Z   path: /opt/hostedtoolcache/flutter/stable-3.47.5-x64
+2026-09-26T15:06:10.1429535Z   key: flutter-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+2026-09-26T15:06:10.1429983Z   enableCrossOsArchive: false
+2026-09-26T15:06:10.1430247Z   fail-on-cache-miss: false
+2026-09-26T15:06:10.1430488Z   lookup-only: false
+2026-09-26T15:06:10.1430703Z   save-always: false
+2026-09-26T15:06:10.1430913Z env:
+2026-09-26T15:06:10.1431211Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:10.1431704Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:10.1432100Z ##[endgroup]
+2026-09-26T15:06:10.5163582Z Cache hit for: flutter-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+2026-09-26T15:06:11.7935563Z Received 4194304 of 1720887668 (0.2%), 4.0 MBs/sec
+2026-09-26T15:06:12.7940172Z Received 134217728 of 1720887668 (7.8%), 64.0 MBs/sec
+2026-09-26T15:06:13.7949091Z Received 289406976 of 1720887668 (16.8%), 92.0 MBs/sec
+2026-09-26T15:06:14.7950401Z Received 503316480 of 1720887668 (29.2%), 120.0 MBs/sec
+2026-09-26T15:06:15.8031479Z Received 692060160 of 1720887668 (40.2%), 131.8 MBs/sec
+2026-09-26T15:06:16.8042308Z Received 914358272 of 1720887668 (53.1%), 145.1 MBs/sec
+2026-09-26T15:06:17.8061205Z Received 1103101952 of 1720887668 (64.1%), 150.0 MBs/sec
+2026-09-26T15:06:18.8130074Z Received 1300234240 of 1720887668 (75.6%), 154.7 MBs/sec
+2026-09-26T15:06:19.8105394Z Received 1476395008 of 1720887668 (85.8%), 156.1 MBs/sec
+2026-09-26T15:06:20.8109237Z Received 1644167168 of 1720887668 (95.5%), 156.5 MBs/sec
+2026-09-26T15:06:21.1613022Z Received 1720887668 of 1720887668 (100.0%), 158.3 MBs/sec
+2026-09-26T15:06:21.1615892Z Cache Size: ~1641 MB (1720887668 B)
+2026-09-26T15:06:21.1766039Z [command]/usr/bin/tar -xf /home/runner/work/_temp/a11e39bb-3c13-487a-92a1-9f74cca560da/cache.tzst -P -C /home/runner/work/JMComic-Flutter/JMComic-Flutter --use-compress-program unzstd
+2026-09-26T15:06:26.3146273Z Cache restored successfully
+2026-09-26T15:06:26.9266656Z Cache restored from key: flutter-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+2026-09-26T15:06:26.9400583Z ##[end-action id=__subosito_flutter-action.cache-flutter;outcome=success;conclusion=success;duration_ms=16802]
+2026-09-26T15:06:26.9403795Z ##[start-action display=Cache pub dependencies;id=__subosito_flutter-action.cache-pub]
+2026-09-26T15:06:27.0570449Z ##[group]Run actions/cache@v5
+2026-09-26T15:06:27.0570716Z with:
+2026-09-26T15:06:27.0570943Z   path: /home/runner/.pub-cache
+2026-09-26T15:06:27.0571660Z   key: flutter-pub-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1-fb55e9fdff423f646f2055330515786b94bbfd391c60e8119bbb0e57c9931f2c
+2026-09-26T15:06:27.0572615Z   enableCrossOsArchive: false
+2026-09-26T15:06:27.0572879Z   fail-on-cache-miss: false
+2026-09-26T15:06:27.0573114Z   lookup-only: false
+2026-09-26T15:06:27.0573325Z   save-always: false
+2026-09-26T15:06:27.0573524Z env:
+2026-09-26T15:06:27.0573819Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:27.0574315Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:27.0574705Z ##[endgroup]
+2026-09-26T15:06:27.4375968Z Cache hit for: flutter-pub-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1-fb55e9fdff423f646f2055330515786b94bbfd391c60e8119bbb0e57c9931f2c
+2026-09-26T15:06:28.7181022Z Received 4194304 of 56795615 (7.4%), 4.0 MBs/sec
+2026-09-26T15:06:29.1831997Z Received 56795615 of 56795615 (100.0%), 36.8 MBs/sec
+2026-09-26T15:06:29.1834695Z Cache Size: ~54 MB (56795615 B)
+2026-09-26T15:06:29.1876553Z [command]/usr/bin/tar -xf /home/runner/work/_temp/3d344a22-3739-4d09-a458-428996a3ef3d/cache.tzst -P -C /home/runner/work/JMComic-Flutter/JMComic-Flutter --use-compress-program unzstd
+2026-09-26T15:06:30.0933165Z Cache restored successfully
+2026-09-26T15:06:30.1041234Z Cache restored from key: flutter-pub-linux-stable-3.47.5-x64-6a19cca56475dbfba1478ee68d7bd0c2ef891da1-fb55e9fdff423f646f2055330515786b94bbfd391c60e8119bbb0e57c9931f2c
+2026-09-26T15:06:30.1116711Z ##[end-action id=__subosito_flutter-action.cache-pub;outcome=success;conclusion=success;duration_ms=3171]
+2026-09-26T15:06:30.1119903Z ##[start-action display=Run setup script;id=__subosito_flutter-action.__run_3]
+2026-09-26T15:06:30.1171204Z ##[group]Run $GITHUB_ACTION_PATH/setup.sh \
+2026-09-26T15:06:30.1171554Z [36;1m$GITHUB_ACTION_PATH/setup.sh \[0m
+2026-09-26T15:06:30.1171836Z [36;1m  -n '3.47.5' \[0m
+2026-09-26T15:06:30.1172077Z [36;1m  -a 'x64' \[0m
+2026-09-26T15:06:30.1172411Z [36;1m  -c '/opt/hostedtoolcache/flutter/stable-3.47.5-x64' \[0m
+2026-09-26T15:06:30.1172783Z [36;1m  -d '/home/runner/.pub-cache' \[0m
+2026-09-26T15:06:30.1173058Z [36;1m  stable[0m
+2026-09-26T15:06:30.1235264Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-09-26T15:06:30.1235626Z env:
+2026-09-26T15:06:30.1235938Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:30.1236452Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:30.1236842Z ##[endgroup]
+2026-09-26T15:06:30.2654800Z ##[end-action id=__subosito_flutter-action.__run_3;outcome=success;conclusion=success;duration_ms=153]
+2026-09-26T15:06:30.3643295Z ##[group]Run actions/cache@v4
+2026-09-26T15:06:30.3643603Z with:
+2026-09-26T15:06:30.3643999Z   path: ~/.gradle/caches
+~/.gradle/wrapper
+
+2026-09-26T15:06:30.3644470Z   key: Linux-gradle-27f93a6fee2f56a04b3674194245836214abc242569cb1a176be1fb80b8570be
+2026-09-26T15:06:30.3644927Z   restore-keys: Linux-gradle-
+2026-09-26T15:06:30.3645214Z   enableCrossOsArchive: false
+2026-09-26T15:06:30.3645466Z   fail-on-cache-miss: false
+2026-09-26T15:06:30.3645714Z   lookup-only: false
+2026-09-26T15:06:30.3645929Z   save-always: false
+2026-09-26T15:06:30.3646129Z env:
+2026-09-26T15:06:30.3646432Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:30.3646927Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:30.3647412Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.47.5-x64/flutter
+2026-09-26T15:06:30.3647787Z   PUB_CACHE: /home/runner/.pub-cache
+2026-09-26T15:06:30.3648298Z ##[endgroup]
+2026-09-26T15:06:30.4750768Z (node:2526) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-26T15:06:30.4751787Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-26T15:06:30.7312782Z Cache hit for: Linux-gradle-27f93a6fee2f56a04b3674194245836214abc242569cb1a176be1fb80b8570be
+2026-09-26T15:06:30.7428621Z (node:2526) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+2026-09-26T15:06:32.0323658Z Received 4194304 of 1462614477 (0.3%), 4.0 MBs/sec
+2026-09-26T15:06:33.0324810Z Received 130023424 of 1462614477 (8.9%), 62.0 MBs/sec
+2026-09-26T15:06:34.0381457Z Received 264241152 of 1462614477 (18.1%), 83.9 MBs/sec
+2026-09-26T15:06:35.0345894Z Received 427819008 of 1462614477 (29.3%), 101.9 MBs/sec
+2026-09-26T15:06:36.0357026Z Received 587202560 of 1462614477 (40.1%), 111.9 MBs/sec
+2026-09-26T15:06:37.0358724Z Received 742391808 of 1462614477 (50.8%), 117.9 MBs/sec
+2026-09-26T15:06:38.0389250Z Received 931135488 of 1462614477 (63.7%), 126.7 MBs/sec
+2026-09-26T15:06:39.0373854Z Received 1073741824 of 1462614477 (73.4%), 127.9 MBs/sec
+2026-09-26T15:06:40.0384300Z Received 1287651328 of 1462614477 (88.0%), 136.3 MBs/sec
+2026-09-26T15:06:41.0355465Z Received 1462614477 of 1462614477 (100.0%), 139.4 MBs/sec
+2026-09-26T15:06:41.0357816Z Cache Size: ~1395 MB (1462614477 B)
+2026-09-26T15:06:41.0413863Z [command]/usr/bin/tar -xf /home/runner/work/_temp/62aa3aef-f318-4868-87ae-8d01b6534034/cache.tzst -P -C /home/runner/work/JMComic-Flutter/JMComic-Flutter --use-compress-program unzstd
+2026-09-26T15:06:48.8449129Z Cache restored successfully
+2026-09-26T15:06:49.1254010Z Cache restored from key: Linux-gradle-27f93a6fee2f56a04b3674194245836214abc242569cb1a176be1fb80b8570be
+2026-09-26T15:06:49.3689234Z ##[group]Run flutter pub get
+2026-09-26T15:06:49.3689752Z [36;1mflutter pub get[0m
+2026-09-26T15:06:49.3760293Z shell: /usr/bin/bash -e {0}
+2026-09-26T15:06:49.3760565Z env:
+2026-09-26T15:06:49.3760886Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:49.3761413Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:49.3761904Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.47.5-x64/flutter
+2026-09-26T15:06:49.3762319Z   PUB_CACHE: /home/runner/.pub-cache
+2026-09-26T15:06:49.3762591Z ##[endgroup]
+2026-09-26T15:06:51.1744326Z Resolving dependencies...
+2026-09-26T15:06:51.2607392Z Downloading packages...
+2026-09-26T15:06:51.4320859Z   cli_util 0.4.2 (0.6.0 available)
+2026-09-26T15:06:51.4321477Z   code_assets 1.2.1 (2.1.0 available)
+2026-09-26T15:06:51.4321989Z   cross_file 0.3.5+5 (0.4.0 available)
+2026-09-26T15:06:51.4322333Z   hooks 2.0.2 (2.2.0 available)
+2026-09-26T15:06:51.4322769Z   material_color_utilities 0.13.0 (0.13.1 available)
+2026-09-26T15:06:51.4323162Z   meta 1.18.3 (1.19.0 available)
+2026-09-26T15:06:51.4323508Z   objective_c 9.5.0 (9.6.0 available)
+2026-09-26T15:06:51.4324223Z ! path_provider_android 2.2.17 (overridden) (2.3.1 available)
+2026-09-26T15:06:51.4324809Z   pointycastle 3.9.1 (4.0.0 available)
+2026-09-26T15:06:51.4325264Z   record_use 0.6.0 (1.1.1 available)
+2026-09-26T15:06:51.4325788Z   test_api 0.7.12 (0.7.14 available)
+2026-09-26T15:06:51.4326289Z   vector_math 2.4.0 (2.4.3 available)
+2026-09-26T15:06:51.4326827Z Got dependencies!
+2026-09-26T15:06:51.4327507Z 12 packages have newer versions incompatible with dependency constraints.
+2026-09-26T15:06:51.4328624Z Try `flutter pub outdated` for more information.
+2026-09-26T15:06:51.6374997Z ##[group]Run flutter analyze --no-fatal-infos
+2026-09-26T15:06:51.6375666Z [36;1mflutter analyze --no-fatal-infos[0m
+2026-09-26T15:06:51.6442414Z shell: /usr/bin/bash -e {0}
+2026-09-26T15:06:51.6442899Z env:
+2026-09-26T15:06:51.6443456Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:51.6444368Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:06:51.6445229Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.47.5-x64/flutter
+2026-09-26T15:06:51.6445639Z   PUB_CACHE: /home/runner/.pub-cache
+2026-09-26T15:06:51.6445914Z ##[endgroup]
+2026-09-26T15:06:51.8124245Z Resolving dependencies...
+2026-09-26T15:06:51.8994279Z Downloading packages...
+2026-09-26T15:06:51.9771309Z   cli_util 0.4.2 (0.6.0 available)
+2026-09-26T15:06:51.9771792Z   code_assets 1.2.1 (2.1.0 available)
+2026-09-26T15:06:51.9772154Z   cross_file 0.3.5+5 (0.4.0 available)
+2026-09-26T15:06:51.9772565Z   hooks 2.0.2 (2.2.0 available)
+2026-09-26T15:06:51.9772932Z   material_color_utilities 0.13.0 (0.13.1 available)
+2026-09-26T15:06:51.9773318Z   meta 1.18.3 (1.19.0 available)
+2026-09-26T15:06:51.9773646Z   objective_c 9.5.0 (9.6.0 available)
+2026-09-26T15:06:51.9774067Z ! path_provider_android 2.2.17 (overridden) (2.3.1 available)
+2026-09-26T15:06:51.9774711Z   pointycastle 3.9.1 (4.0.0 available)
+2026-09-26T15:06:51.9775093Z   record_use 0.6.0 (1.1.1 available)
+2026-09-26T15:06:51.9775416Z   test_api 0.7.12 (0.7.14 available)
+2026-09-26T15:06:51.9775747Z   vector_math 2.4.0 (2.4.3 available)
+2026-09-26T15:06:51.9776072Z Got dependencies!
+2026-09-26T15:06:51.9776486Z 12 packages have newer versions incompatible with dependency constraints.
+2026-09-26T15:06:51.9777021Z Try `flutter pub outdated` for more information.
+2026-09-26T15:07:02.1362643Z Analyzing JMComic-Flutter...                                    
+2026-09-26T15:07:02.1379833Z No issues found! (ran in 9.6s)
+2026-09-26T15:07:02.1491309Z ##[group]Run flutter test
+2026-09-26T15:07:02.1491620Z [36;1mflutter test[0m
+2026-09-26T15:07:02.1554477Z shell: /usr/bin/bash -e {0}
+2026-09-26T15:07:02.1554740Z env:
+2026-09-26T15:07:02.1555064Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:07:02.1555589Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:07:02.1556096Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.47.5-x64/flutter
+2026-09-26T15:07:02.1556495Z   PUB_CACHE: /home/runner/.pub-cache
+2026-09-26T15:07:02.1556767Z ##[endgroup]
+2026-09-26T15:07:02.3349946Z Resolving dependencies...
+2026-09-26T15:07:02.4211968Z Downloading packages...
+2026-09-26T15:07:02.4982140Z   cli_util 0.4.2 (0.6.0 available)
+2026-09-26T15:07:02.4982958Z   code_assets 1.2.1 (2.1.0 available)
+2026-09-26T15:07:02.4983720Z   cross_file 0.3.5+5 (0.4.0 available)
+2026-09-26T15:07:02.4984474Z   hooks 2.0.2 (2.2.0 available)
+2026-09-26T15:07:02.4985293Z   material_color_utilities 0.13.0 (0.13.1 available)
+2026-09-26T15:07:02.4986100Z   meta 1.18.3 (1.19.0 available)
+2026-09-26T15:07:02.4986796Z   objective_c 9.5.0 (9.6.0 available)
+2026-09-26T15:07:02.4987556Z ! path_provider_android 2.2.17 (overridden) (2.3.1 available)
+2026-09-26T15:07:02.4988601Z   pointycastle 3.9.1 (4.0.0 available)
+2026-09-26T15:07:02.4989291Z   record_use 0.6.0 (1.1.1 available)
+2026-09-26T15:07:02.4990001Z   test_api 0.7.12 (0.7.14 available)
+2026-09-26T15:07:02.4990619Z   vector_math 2.4.0 (2.4.3 available)
+2026-09-26T15:07:02.4991259Z Got dependencies!
+2026-09-26T15:07:02.4991895Z 12 packages have newer versions incompatible with dependency constraints.
+2026-09-26T15:07:02.4992672Z Try `flutter pub outdated` for more information.
+2026-09-26T15:07:04.1810777Z 
+2026-09-26T15:07:13.6788571Z ##[group]✅ Passing tests
+2026-09-26T15:07:13.6791958Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） md5Hex 输出 32 位小写 hex
+2026-09-26T15:07:13.6848690Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） randomToken 与 Tokenparam 规范（token 密钥 = 18comicAPP）
+2026-09-26T15:07:13.6886612Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） scrambleToken 使用 18comicAPPContent（chapter_view_template 专用）
+2026-09-26T15:07:13.6914320Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） AES 密钥为 32 字节 hex 字符串形态
+2026-09-26T15:07:13.7306073Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） decryptData 使用请求 ts 派生密钥（jmcomic decode_resp_data 同款）
+2026-09-26T15:07:13.7386688Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmCrypto（对齐 tonquer/JMComic-qt） backupHostCode 可解密为有效主机配置
+2026-09-26T15:07:13.7420745Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmDomain（对齐 qt GlobalConfig） 默认域名与 qt Url2List / PicUrlList 一致
+2026-09-26T15:07:13.7480136Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmDomain（对齐 qt GlobalConfig） getApiUrl / getImgUrl 索引语义（5=CDN，6=代理）
+2026-09-26T15:07:13.7587447Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmDomain（对齐 qt GlobalConfig） updateSettingFromText 版本判断（仅更新更高版本）
+2026-09-26T15:07:13.7639425Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: JmDomain（对齐 qt GlobalConfig） updateSettingFromText 支持逗号分隔列表
+2026-09-26T15:07:13.7668741Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: Scramble needScramble 阈值判定
+2026-09-26T15:07:13.7731157Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: Scramble scrambleNum 查表范围（对齐 qt GetSegmentationNum）
+2026-09-26T15:07:13.7780704Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/core_test.dart: Scramble filenameFromUrl 提取文件名
+2026-09-26T15:07:14.2900338Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/widget_test.dart: 反馈组件（feedback.dart） SectionHeader 渲染标题
+2026-09-26T15:07:14.3295434Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/widget_test.dart: 反馈组件（feedback.dart） EmptyView 渲染空态文案
+2026-09-26T15:07:14.3797482Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/widget_test.dart: 反馈组件（feedback.dart） Pill 渲染胶囊标签
+2026-09-26T15:07:14.4458471Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/widget_test.dart: AlbumCard 渲染标题与作者信息
+2026-09-26T15:07:14.9490636Z ✅ /home/runner/work/JMComic-Flutter/JMComic-Flutter/test/widget_test.dart: SearchPage 落地页 不触发搜索时仅展示轻量内容
+2026-09-26T15:07:14.9670621Z ##[endgroup]
+2026-09-26T15:07:14.9670891Z 
+2026-09-26T15:07:14.9676533Z 🎉 18 tests passed.
+2026-09-26T15:07:15.0298750Z ##[group]Run flutter build apk --release
+2026-09-26T15:07:15.0299189Z [36;1mflutter build apk --release[0m
+2026-09-26T15:07:15.0299535Z [36;1mflutter build apk --release --split-per-abi[0m
+2026-09-26T15:07:15.0363299Z shell: /usr/bin/bash -e {0}
+2026-09-26T15:07:15.0363565Z env:
+2026-09-26T15:07:15.0363898Z   JAVA_HOME: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:07:15.0364412Z   JAVA_HOME_21_X64: /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/21.0.12-1/x64
+2026-09-26T15:07:15.0364910Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.47.5-x64/flutter
+2026-09-26T15:07:15.0365309Z   PUB_CACHE: /home/runner/.pub-cache
+2026-09-26T15:07:15.0365585Z ##[endgroup]
+2026-09-26T15:07:15.2621777Z Resolving dependencies...
+2026-09-26T15:07:15.3553468Z Downloading packages...
+2026-09-26T15:07:15.4333021Z   cli_util 0.4.2 (0.6.0 available)
+2026-09-26T15:07:15.4333752Z   code_assets 1.2.1 (2.1.0 available)
+2026-09-26T15:07:15.4334423Z   cross_file 0.3.5+5 (0.4.0 available)
+2026-09-26T15:07:15.4335025Z   hooks 2.0.2 (2.2.0 available)
+2026-09-26T15:07:15.4335631Z   material_color_utilities 0.13.0 (0.13.1 available)
+2026-09-26T15:07:15.4336248Z   meta 1.18.3 (1.19.0 available)
+2026-09-26T15:07:15.4336817Z   objective_c 9.5.0 (9.6.0 available)
+2026-09-26T15:07:15.4337418Z ! path_provider_android 2.2.17 (overridden) (2.3.1 available)
+2026-09-26T15:07:15.4338322Z   pointycastle 3.9.1 (4.0.0 available)
+2026-09-26T15:07:15.4338800Z   record_use 0.6.0 (1.1.1 available)
+2026-09-26T15:07:15.4339268Z   test_api 0.7.12 (0.7.14 available)
+2026-09-26T15:07:15.4339731Z   vector_math 2.4.0 (2.4.3 available)
+2026-09-26T15:07:15.4340171Z Got dependencies!
+2026-09-26T15:07:15.4340761Z 12 packages have newer versions incompatible with dependency constraints.
+2026-09-26T15:07:15.4341551Z Try `flutter pub outdated` for more information.
+2026-09-26T15:08:03.5239121Z Running Gradle task 'assembleRelease'...                        
+2026-09-26T15:08:03.5282973Z Font asset "MaterialIcons-Regular.otf" was tree-shaken, reducing it from 1645184 to 16076 bytes (99.0% reduction). Tree-shaking can be disabled by providing the --no-tree-shake-icons flag when building your app.
+2026-09-26T15:08:35.5249374Z Caught exception: Already watching path: /home/runner/work/JMComic-Flutter/JMComic-Flutter/android
+2026-09-26T15:08:48.6127807Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmHomeWidgetProvider.kt:129:25 Function invocation 'isNotEmpty()' expected.
+2026-09-26T15:08:48.6130210Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:181:36 Unresolved reference 'Context'.
+2026-09-26T15:08:48.6132042Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:182:32 Unresolved reference 'cacheDir'.
+2026-09-26T15:08:48.6189352Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:183:18 Unresolved reference 'exists'.
+2026-09-26T15:08:48.6211322Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:183:32 Unresolved reference 'mkdirs'.
+2026-09-26T15:08:48.6229130Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:188:34 Unresolved reference 'Context'.
+2026-09-26T15:08:48.6269244Z e: file:///home/runner/work/JMComic-Flutter/JMComic-Flutter/android/app/src/main/kotlin/com/ming/jmcomic/JmWidgetApi.kt:196:35 Unresolved reference 'Context'.
+2026-09-26T15:08:55.9101201Z 
+2026-09-26T15:08:55.9137821Z FAILURE: Build failed with an exception.
+2026-09-26T15:08:55.9148450Z 
+2026-09-26T15:08:55.9178916Z * What went wrong:
+2026-09-26T15:08:55.9185138Z Execution failed for task ':app:compileReleaseKotlin'.
+2026-09-26T15:08:55.9186442Z > A failure occurred while executing org.jetbrains.kotlin.compilerRunner.btapi.BuildToolsApiCompilationWork
+2026-09-26T15:08:55.9188647Z    > Compilation error. See log for more details
+2026-09-26T15:08:55.9189404Z 
+2026-09-26T15:08:55.9189774Z * Try:
+2026-09-26T15:08:55.9190465Z > Run with --stacktrace option to get the stack trace.
+2026-09-26T15:08:55.9191349Z > Run with --info or --debug option to get more log output.
+2026-09-26T15:08:55.9192433Z > Run with --scan to get full insights from a Build Scan (powered by Develocity).
+2026-09-26T15:08:55.9193477Z > Get more help at https://help.gradle.org.
+2026-09-26T15:08:55.9194063Z 
+2026-09-26T15:08:55.9194446Z BUILD FAILED in 1m 38s
+2026-09-26T15:08:56.3463422Z Running Gradle task 'assembleRelease'...                          100.5s
+2026-09-26T15:08:56.3952467Z Gradle task assembleRelease failed with exit code 1
+2026-09-26T15:08:56.4007615Z ##[error]Process completed with exit code 1.
+2026-09-26T15:08:56.4210970Z Post job cleanup.
+2026-09-26T15:08:56.4217047Z ##[start-action display=Cache pub dependencies;id=__165cad13-a5b9-45ce-b52d-dced593102ec.cache-pub]
+2026-09-26T15:08:56.4220708Z ##[end-action id=__165cad13-a5b9-45ce-b52d-dced593102ec.cache-pub;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-26T15:08:56.4222820Z ##[start-action display=Cache Flutter;id=__165cad13-a5b9-45ce-b52d-dced593102ec.cache-flutter]
+2026-09-26T15:08:56.4224945Z ##[end-action id=__165cad13-a5b9-45ce-b52d-dced593102ec.cache-flutter;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-09-26T15:08:56.4290331Z Post job cleanup.
+2026-09-26T15:08:56.5643167Z (node:3257) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-09-26T15:08:56.5644480Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-09-26T15:08:56.5835303Z Post job cleanup.
+2026-09-26T15:08:56.6781499Z [command]/usr/bin/git version
+2026-09-26T15:08:56.6825696Z git version 2.55.0
+2026-09-26T15:08:56.6865607Z Temporarily overriding HOME='/home/runner/work/_temp/0e3eac0d-1209-4d5b-b115-56729061d6f7' before making global git config changes
+2026-09-26T15:08:56.6866999Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-26T15:08:56.6872795Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/JMComic-Flutter/JMComic-Flutter
+2026-09-26T15:08:56.6913366Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-26T15:08:56.6950837Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-26T15:08:56.7209388Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-26T15:08:56.7238108Z http.https://github.com/.extraheader
+2026-09-26T15:08:56.7251330Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-09-26T15:08:56.7286240Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-26T15:08:56.7545160Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-26T15:08:56.7590957Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-26T15:08:56.8013026Z Cleaning up orphan processes
+2026-09-26T15:08:56.8341716Z Terminate orphan process: pid (2818) (java)
+2026-09-26T15:08:56.8369383Z Terminate orphan process: pid (3127) (java)
+2026-09-26T15:08:56.8379715Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/cache@v4, actions/checkout@v4, actions/setup-java@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
