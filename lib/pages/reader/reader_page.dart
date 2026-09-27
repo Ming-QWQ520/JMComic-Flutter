@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../core/protocol/jm_api.dart';
+import '../../core/protocol/jm_domain.dart';
 import '../../core/protocol/models.dart';
 import '../../core/utils/scramble.dart';
 import '../../state/app_state.dart';
@@ -906,6 +907,108 @@ class _ReaderPageState extends State<ReaderPage> {
     );
   }
 
+  /// 图片线路切换面板：列出全部图片线路（含 CDN/代理），显示测速
+  /// 延迟；可直接点选切换（立即生效并重新加载当前页附近图片），
+  /// 也可先「测速」再按延迟自行选择。
+  void _showImgLineSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext sheetCtx) {
+        final app = sheetCtx.watch<AppState>();
+        final cs = Theme.of(sheetCtx).colorScheme;
+        final options = <MapEntry<int, String>>[
+          for (var i = 0; i < JmDomain.picUrlList.value.length; i++)
+            MapEntry<int, String>(
+              i + 1,
+              Uri.parse(JmDomain.picUrlList.value[i]).host,
+            ),
+          const MapEntry<int, String>(5, 'CDN 加速线路'),
+          const MapEntry<int, String>(6, '代理线路'),
+        ];
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+                child: Row(
+                  children: <Widget>[
+                    Text('图片线路',
+                        style: Theme.of(sheetCtx)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed:
+                          app.speedTesting ? null : app.testApiSpeed,
+                      icon: app.speedTesting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2))
+                          : const Icon(Icons.speed_rounded, size: 18),
+                      label: const Text('测速'),
+                    ),
+                  ],
+                ),
+              ),
+              ...options.map((MapEntry<int, String> e) {
+                final v = app.imgSpeedResults[e.key.toString()];
+                final selected = app.imgIndex == e.key;
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    e.value,
+                    style: selected
+                        ? TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: cs.primary,
+                          )
+                        : null,
+                  ),
+                  subtitle: v == null
+                      ? null
+                      : Text(
+                          v < 0 ? '不可用' : '$v ms',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: v < 0 ? cs.error : Colors.green,
+                          ),
+                        ),
+                  trailing: selected
+                      ? Icon(Icons.check_circle_rounded,
+                          size: 20, color: cs.primary)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    _switchImgLine(e.key);
+                  },
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 切换图片线路：更换 host 后清空字节缓存，重新加载当前页附近
+  /// （图片 URL 在下载时按当前线路拼接，新线路即刻生效）。
+  Future<void> _switchImgLine(int idx) async {
+    final app = context.read<AppState>();
+    if (app.imgIndex == idx) return;
+    await app.setImgIndex(idx);
+    if (!mounted) return;
+    setState(() {
+      _cache.clear();
+      _failedPages.clear();
+    });
+    _preload(_currentPage);
+  }
+
   /// 顶部弹窗：左上角返回按键 + 漫画名称。
   ///
   /// 用户反馈要求：返回键从右上角移到左上角，符合通用阅读器习惯
@@ -959,6 +1062,15 @@ class _ReaderPageState extends State<ReaderPage> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                ),
+                // 图片线路切换：可直接换线路，也可测速后再选
+                IconButton(
+                  tooltip: '图片线路',
+                  icon: const Icon(
+                    Icons.dns_rounded,
+                    color: Colors.white,
+                  ),
+                  onPressed: _showImgLineSheet,
                 ),
               ],
             ),

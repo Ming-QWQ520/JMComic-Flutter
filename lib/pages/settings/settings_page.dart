@@ -93,26 +93,12 @@ class SettingsPage extends StatelessWidget {
                             (MapEntry<int, String> e) => RadioListTile<int>(
                               value: e.key,
                               title: Text(e.value),
-                              subtitle: _speedSubtitle(context, state, e.key),
+                              subtitle: _speedSubtitle(
+                                  context, state.speedResults, e.key),
                               dense: true,
                             ),
                           )
                           .toList(),
-                    ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed:
-                          state.speedTesting ? null : state.testApiSpeed,
-                      icon: state.speedTesting
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child:
-                                  CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.speed_rounded, size: 18),
-                      label: const Text('线路测速'),
                     ),
                   ),
                   const Divider(),
@@ -129,10 +115,28 @@ class SettingsPage extends StatelessWidget {
                             (MapEntry<int, String> e) => RadioListTile<int>(
                               value: e.key,
                               title: Text(e.value),
+                              subtitle: _speedSubtitle(
+                                  context, state.imgSpeedResults, e.key),
                               dense: true,
                             ),
                           )
                           .toList(),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: state.speedTesting
+                          ? null
+                          : state.testApiSpeed,
+                      icon: state.speedTesting
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.speed_rounded, size: 18),
+                      label: const Text('线路测速（API + 图片）'),
                     ),
                   ),
                 ],
@@ -365,14 +369,13 @@ class SettingsPage extends StatelessWidget {
                     ),
                     Padding(
                       padding: const EdgeInsets.fromLTRB(8, 0, 16, 4),
-                      child: Slider(
-                        min: 0,
-                        max: 100,
-                        divisions: 100,
+                      child: _TunableSlider(
                         value: (state.backgroundOpacity * 100)
                             .round()
                             .toDouble(),
-                        onChanged: (double v) =>
+                        min: 0,
+                        divisions: 100,
+                        onCommit: (double v) =>
                             state.setBackgroundOpacity(v / 100.0),
                       ),
                     ),
@@ -427,13 +430,11 @@ class SettingsPage extends StatelessWidget {
                   ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(8, 0, 16, 8),
-                    child: Slider(
-                      min: 10,
-                      max: 100,
-                      divisions: 90,
+                    child: _TunableSlider(
                       value: (state.cardOpacity * 100).round().toDouble(),
-                      onChanged: (double v) =>
-                          state.setCardOpacity(v / 100.0),
+                      min: 10,
+                      divisions: 90,
+                      onCommit: (double v) => state.setCardOpacity(v / 100.0),
                     ),
                   ),
                 ],
@@ -505,14 +506,14 @@ class SettingsPage extends StatelessWidget {
     );
   }
 
-  /// 翻页方向测速结果子标题：固定宽度对齐，避免短文本"不可用 / 12 ms"
-  /// 切换时位置偏差。
+  /// 线路测速结果子标题：固定宽度对齐，避免短文本"不可用 / 12 ms"
+  /// 切换时位置偏差。[results] 为 API 或图片线路的测速结果表。
   Widget? _speedSubtitle(
     BuildContext context,
-    AppState state,
+    Map<String, int> results,
     int idx,
   ) {
-    final v = state.speedResults[idx.toString()];
+    final v = results[idx.toString()];
     if (v == null) return null;
     final cs = Theme.of(context).colorScheme;
     final String text = v < 0 ? '不可用' : '$v ms';
@@ -867,6 +868,57 @@ class _ThemeGrid extends StatelessWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 可本地预览的滑杆：拖动过程只重建滑杆自身（实时更新位置），松手
+/// 后才把最终值提交给全局状态并触发一次主题重建。
+///
+/// 修复：此前 onChanged 每个刻度都走 AppState.notifyListeners →
+/// MaterialApp 主题整体重建，拖动中切换页面/滑动列表时会出现旧
+/// 页面短暂闪现与掉帧。
+class _TunableSlider extends StatefulWidget {
+  const _TunableSlider({
+    required this.value,
+    required this.min,
+    required this.divisions,
+    required this.onCommit,
+  });
+
+  /// 当前全局值（0~100）。
+  final double value;
+  final double min;
+  final int divisions;
+  final ValueChanged<double> onCommit;
+
+  @override
+  State<_TunableSlider> createState() => _TunableSliderState();
+}
+
+class _TunableSliderState extends State<_TunableSlider> {
+  late double _v = widget.value;
+  bool _dragging = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      min: widget.min,
+      max: 100,
+      divisions: widget.divisions,
+      value: (_dragging ? _v : widget.value).clamp(widget.min, 100),
+      onChangeStart: (double v) => setState(() {
+        _dragging = true;
+        _v = v;
+      }),
+      onChanged: (double v) => setState(() => _v = v),
+      onChangeEnd: (double v) {
+        setState(() {
+          _dragging = false;
+          _v = v;
+        });
+        widget.onCommit(v);
+      },
     );
   }
 }

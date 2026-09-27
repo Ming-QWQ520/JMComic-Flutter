@@ -103,14 +103,22 @@ class _AppLockGateState extends State<AppLockGate>
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: <Widget>[
-        widget.child,
-        if (_locked)
-          Positioned.fill(
-            child: Directionality(
-              textDirection: TextDirection.ltr,
+    // 关键：本组件包在 MaterialApp 之外，上方没有 Directionality 祖先。
+    // Stack 默认 alignment 是 AlignmentDirectional.topStart，布局解析
+    // 需要 Directionality，缺失会在根级 layout 直接崩溃
+    //（"Null check operator used on a null value" @ RenderStack，
+    // 表现为整个 App 卡死在启动画面，log.txt 已实锤）。
+    // 因此这里显式提供 Directionality，并把 alignment 换成不依赖
+    // 方向的 Alignment.topLeft 双保险。
+    return Directionality(
+      textDirection: TextDirection.ltr,
+      child: Stack(
+        fit: StackFit.expand,
+        alignment: Alignment.topLeft,
+        children: <Widget>[
+          widget.child,
+          if (_locked)
+            Positioned.fill(
               child: Material(
                 color: const Color(0xFF101010),
                 child: SafeArea(
@@ -170,8 +178,8 @@ class _AppLockGateState extends State<AppLockGate>
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

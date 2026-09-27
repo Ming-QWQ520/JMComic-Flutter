@@ -13,6 +13,7 @@ import 'package:jmcomic/core/protocol/models.dart';
 import 'package:jmcomic/pages/search/search_page.dart';
 import 'package:jmcomic/state/app_state.dart';
 import 'package:jmcomic/widgets/album_card.dart';
+import 'package:jmcomic/widgets/app_lock_gate.dart';
 import 'package:jmcomic/widgets/feedback.dart';
 import 'package:provider/provider.dart';
 
@@ -84,6 +85,29 @@ void main() {
       expect(find.textContaining('提示：'), findsOneWidget);
       // 输入纯数字时不展示旧版"编号直达卡片"，提交后直接跳详情。
       expect(find.text('输入漫画编号可直达详情页'), findsNothing);
+    });
+  });
+
+  group('应用锁门卫（app_lock_gate.dart）', () {
+    testWidgets('根级使用（无 Directionality 祖先）不崩溃', (tester) async {
+      // 回归：门卫的 Stack 曾位于 MaterialApp 之上且使用默认
+      // AlignmentDirectional 对齐，布局时因缺 Directionality 抛
+      // "Null check operator used on a null value"，真机启动即卡死。
+      await tester.pumpWidget(
+        const AppLockGate(enabled: false, child: SizedBox.expand()),
+      );
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('开启应用锁后渲染锁定层', (tester) async {
+      await tester.pumpWidget(
+        const AppLockGate(enabled: true, child: SizedBox.expand()),
+      );
+      await tester.pump();
+      expect(find.byIcon(Icons.lock_rounded), findsOneWidget);
+      // 测试宿主非 Android：认证直接不可用，展示手动解锁按钮。
+      expect(find.text('解锁'), findsOneWidget);
     });
   });
 }

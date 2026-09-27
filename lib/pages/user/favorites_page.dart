@@ -3,13 +3,16 @@ import 'package:flutter/material.dart';
 import '../../core/protocol/jm_api.dart';
 import '../../core/protocol/models.dart';
 import '../../widgets/album_card.dart';
+import '../../widgets/cover_image.dart';
 import '../../widgets/feedback.dart';
 
 /// 收藏页（对齐 qt FavoriteView / FavoriteFoldView）。
 ///
 /// - GET favorite?page=&folder_id=&o= 分页加载（mr 收藏时间 / mp 更新时间）；
 /// - 响应中的 folder_list 驱动收藏夹切换；
-/// - POST favorite_folder 新建/删除收藏夹。
+/// - POST favorite_folder 新建/删除收藏夹；
+/// - 支持宫格/列表两种展示（默认列表：紧凑行 + 小封面，大量收藏时
+///   单屏可见更多条目，配合本地搜索快速定位）。
 class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key});
 
@@ -25,6 +28,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
   // 「收藏多很难找」，主要痛点是已加载内容查找，非未加载内容发现）。
   final TextEditingController _searchCtrl = TextEditingController();
   String _query = '';
+  // 展示模式：false=列表（默认），true=宫格。
+  bool _grid = false;
 
   final List<SearchAlbum> _items = <SearchAlbum>[];
   final List<FavoriteFolder> _folders = <FavoriteFolder>[];
@@ -122,6 +127,88 @@ class _FavoritesPageState extends State<FavoritesPage> {
     }
   }
 
+  /// 宫格模式：封面卡片网格（比初版再缩小一档，单屏可见更多）。
+  Widget _buildGrid() {
+    return GridView.builder(
+      controller: _scroll,
+      padding: const EdgeInsets.all(12),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 100,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 8,
+        childAspectRatio: 0.5,
+      ),
+      itemCount: _filtered.length + (_query.isEmpty && !_noMore ? 1 : 0),
+      itemBuilder: (_, i) {
+        if (i >= _filtered.length) {
+          return const Center(
+              child: CircularProgressIndicator(strokeWidth: 2));
+        }
+        final a = _filtered[i];
+        return AlbumCard(
+          album: a,
+          onTap: () =>
+              Navigator.pushNamed(context, '/album', arguments: a),
+        );
+      },
+    );
+  }
+
+  /// 列表模式（默认）：紧凑行 + 小封面（44x58），大量收藏时浏览效率
+  /// 高于宫格；复用 CoverImage 走统一魔数校验/换线路重试逻辑。
+  Widget _buildList() {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return ListView.separated(
+      controller: _scroll,
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+      itemCount: _filtered.length + (_query.isEmpty && !_noMore ? 1 : 0),
+      separatorBuilder: (_, _) => const SizedBox(height: 2),
+      itemBuilder: (_, i) {
+        if (i >= _filtered.length) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Center(
+                child: CircularProgressIndicator(strokeWidth: 2)),
+          );
+        }
+        final a = _filtered[i];
+        return ListTile(
+          dense: true,
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 44,
+              height: 58,
+              child: CoverImage(album: a),
+            ),
+          ),
+          title: Text(
+            a.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: tt.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              a.author.isEmpty ? 'ID ${a.id}' : a.author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ),
+          trailing: Icon(Icons.chevron_right_rounded,
+              size: 18, color: cs.onSurfaceVariant),
+          onTap: () =>
+              Navigator.pushNamed(context, '/album', arguments: a),
+        );
+      },
+    );
+  }
+
   /// 新建收藏夹（对齐 AddFavoritesFoldReq2）。
   Future<void> _addFolder() async {
     final ctrl = TextEditingController();
@@ -195,6 +282,13 @@ class _FavoritesPageState extends State<FavoritesPage> {
       appBar: AppBar(
         title: const Text('我的收藏'),
         actions: <Widget>[
+          IconButton(
+            tooltip: _grid ? '列表显示' : '宫格显示',
+            icon: Icon(_grid
+                ? Icons.view_list_rounded
+                : Icons.grid_view_rounded),
+            onPressed: () => setState(() => _grid = !_grid),
+          ),
           PopupMenuButton<String>(
             tooltip: '排序',
             icon: const Icon(Icons.sort_rounded),
@@ -292,36 +386,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
                             message: _query.isEmpty
                                 ? '暂无收藏'
                                 : '未找到匹配「$_query」的收藏')
-                        : GridView.builder(
-                            controller: _scroll,
-                            padding: const EdgeInsets.all(12),
-                            // 缩小卡片：maxCrossAxisExtent 160→110，
-                            // childAspectRatio 0.55→0.52（更紧凑、单屏
-                            // 可见更多漫画，方便用户在大量收藏中快速浏览）。
-                            gridDelegate:
-                                const SliverGridDelegateWithMaxCrossAxisExtent(
-                              maxCrossAxisExtent: 110,
-                              mainAxisSpacing: 10,
-                              crossAxisSpacing: 8,
-                              childAspectRatio: 0.52,
-                            ),
-                            itemCount: _filtered.length +
-                                (_query.isEmpty && !_noMore ? 1 : 0),
-                            itemBuilder: (_, i) {
-                              if (i >= _filtered.length) {
-                                return const Center(
-                                    child: CircularProgressIndicator(
-                                        strokeWidth: 2));
-                              }
-                              final a = _filtered[i];
-                              return AlbumCard(
-                                album: a,
-                                onTap: () => Navigator.pushNamed(
-                                    context, '/album',
-                                    arguments: a),
-                              );
-                            },
-                          ),
+                        : _grid
+                            ? _buildGrid()
+                            : _buildList(),
           ),
           // 统计条
           SafeArea(

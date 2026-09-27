@@ -142,6 +142,9 @@ class AppState extends ChangeNotifier {
   Map<String, int> speedResults = <String, int>{};
   bool speedTesting = false;
 
+  /// 图片线路测速结果（键与 [speedResults] 相同：1..N 主机、5 CDN、6 代理）。
+  Map<String, int> imgSpeedResults = <String, int>{};
+
   // ---------- 登录态 ----------
   LoginData? _user;
   LoginData? get user => _user;
@@ -365,27 +368,45 @@ class AppState extends ChangeNotifier {
     await _store.setInt('card_opacity', (_cardOpacity * 100).round());
   }
 
-  /// 测速全部 API 线路（对齐 qt SpeedTestPingReq）。
+  /// 线路测速（对齐 qt SpeedTestPingReq：HEAD 请求计时）。
   ///
-  /// 同时测速所有候选线路（4 个主线路 + CDN + 代理），
-  /// 测速键使用与 `_apiOptions`/`_imgOptions` 相同的索引
-  /// （1..N 为真实主机，N+1 为 CDN，N+2 为代理）。
+  /// 并行测试 API 线路与图片线路（各含 4 个主线路 + CDN5 + 代理6），
+  /// 结果分别写入 [speedResults] / [imgSpeedResults]，键为线路索引
+  /// （1..N 为真实主机，5 为 CDN，6 为代理，与设置页/阅读器选项一致）。
   Future<void> testApiSpeed() async {
     if (speedTesting) return;
     speedTesting = true;
     notifyListeners();
     final out = <String, int>{};
-    // 1) 主线路：直接 ping 主机。
-    final list = JmDomain.apiUrlList.value;
-    for (var i = 0; i < list.length; i++) {
-      final idx = i + 1;
-      out[idx.toString()] = await _c.pingHost(list[i]);
+    final outImg = <String, int>{};
+    final jobs = <Future<void>>[];
+    // API 线路：主线路 1..N 并行。
+    final apiList = JmDomain.apiUrlList.value;
+    for (var i = 0; i < apiList.length; i++) {
+      final idx = (i + 1).toString();
+      jobs.add(_c.pingHost(apiList[i]).then((v) => out[idx] = v));
     }
-    // 2) CDN 加速线路（索引 5）。
-    out['5'] = await _c.pingHost(JmDomain.cdnApiUrl.value);
-    // 3) 代理线路（索引 6）。
-    out['6'] = await _c.pingHost(JmDomain.proxyApiUrl.value);
+    jobs.add(
+      _c.pingHost(JmDomain.cdnApiUrl.value).then((v) => out['5'] = v),
+    );
+    jobs.add(
+      _c.pingHost(JmDomain.proxyApiUrl.value).then((v) => out['6'] = v),
+    );
+    // 图片线路：与 API 线路同索引语义，一次测速同时出结果。
+    final imgList = JmDomain.picUrlList.value;
+    for (var i = 0; i < imgList.length; i++) {
+      final idx = (i + 1).toString();
+      jobs.add(_c.pingHost(imgList[i]).then((v) => outImg[idx] = v));
+    }
+    jobs.add(
+      _c.pingHost(JmDomain.cdnImgUrl.value).then((v) => outImg['5'] = v),
+    );
+    jobs.add(
+      _c.pingHost(JmDomain.proxyImgUrl.value).then((v) => outImg['6'] = v),
+    );
+    await Future.wait(jobs);
     speedResults = out;
+    imgSpeedResults = outImg;
     speedTesting = false;
     notifyListeners();
   }

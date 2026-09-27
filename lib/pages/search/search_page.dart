@@ -50,7 +50,8 @@ class _SearchPageState extends State<SearchPage>
     'mr': '最新',
     'mv': '最多点击',
     'mp': '最多图片',
-    'tf': '最多爱心',
+    // JM 服务端搜索排序值 tf（total favorites）：收藏/爱心最多
+    'tf': '收藏最多',
   };
 
   /// 热门搜索（点击即搜，对齐 qt 搜索页快捷标签）。
