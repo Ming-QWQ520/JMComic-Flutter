@@ -1,22 +1,18 @@
-import 'dart:async';
-import 'dart:io';
-
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart' show NavigatorState;
 
 import '../core/protocol/jm_api.dart';
 
-/// 桌面小组件 + 长按图标快捷菜单的数据桥（Android 原生 MethodChannel）。
+/// 长按图标快捷菜单的数据桥（Android 原生 MethodChannel）。
 ///
-/// 双向通信：
-/// - Flutter → Native：writeUserName / writeRandomAlbum 把登录态/随机推荐
-///   数据写入 SharedPreferences，触发 widget 刷新。
-/// - Native → Flutter：长按图标 shortcut 或桌面小组件点击跳转时，
-///   Android 通过 channel.invokeMethod("jm_action", {action, albumId})
-///   把动作发到 Flutter，由 [WidgetBridge._onAction] 处理导航。
+/// - Native → Flutter：长按图标快捷菜单（随机推荐 / 每周更新）点击
+///   跳转时，Android 通过 channel.invokeMethod("jm_action",
+///   {action, albumId}) 把动作发到 Flutter，由 [WidgetBridge._onAction]
+///   分发处理导航。
+/// - 同时 main 端监听 channel 的 isAtRoot 方法调用，告诉原生是否在根
+///   路由（决定双击退出逻辑是否启用）。
 ///
-/// 同时 main 端监听 channel 的 isAtRoot 方法调用，告诉原生是否在根路由
-/// （决定双击退出逻辑是否启用）。
+/// （桌面小组件功能已移除，本桥仅供快捷菜单与双击退出使用。）
 class WidgetBridge {
   WidgetBridge._();
 
@@ -141,44 +137,6 @@ class WidgetBridge {
         break;
       default:
         break;
-    }
-  }
-
-  /// 把用户信息卡同步到桌面小组件（名称/收藏/J币/经验）。
-  /// 登录、退出、进入 APP、资料刷新时调用。
-  Future<void> writeUserCard({
-    String? name,
-    String favorites = '-',
-    String coin = '-',
-    String exp = '-',
-  }) async {
-    if (!Platform.isAndroid) return;
-    try {
-      await _channel.invokeMethod<bool>('writeUserCard', <String, dynamic>{
-        'name': name ?? '未登录',
-        'favorites': favorites,
-        'coin': coin,
-        'exp': exp,
-      });
-    } on PlatformException {
-      // 静默失败：widget 不应阻塞主流程
-    }
-  }
-
-  /// 把一批随机推荐漫画同步到桌面小组件（多页轮播展示）。
-  ///
-  /// [albums] 每项含 name / id / coverUrl；widget 端按 ViewFlipper
-  /// 多页渲染，左右翻页按钮 + 页码指示，点击某页打开对应详情。
-  Future<void> writeRandomAlbums(
-    List<Map<String, String>> albums,
-  ) async {
-    if (!Platform.isAndroid || albums.isEmpty) return;
-    try {
-      await _channel.invokeMethod<bool>('writeRandomAlbums', <String, dynamic>{
-        'albums': albums,
-      });
-    } on PlatformException {
-      // 静默失败：widget 不应阻塞主流程
     }
   }
 }

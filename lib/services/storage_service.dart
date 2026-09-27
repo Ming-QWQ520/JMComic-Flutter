@@ -47,12 +47,11 @@ class StorageService {
 
   /// 调用系统文件管理器打开文件夹。
   ///
-  /// Android：Intent.createChooser 显式拉起系统「打开建议」面板——
-  /// 无论命中几个应用都必然弹出选择面板，不会被 ROM 静默直开；
-  /// 主意图为 SAF content:// 目录 URI（系统"文件"可直接定位），
-  /// file:// 各 MIME 变体经 EXTRA_ALTERNATE_INTENTS 并入同一面板
-  /// （MT 管理器等第三方注册的是 file://）；全部失败时退回 SAF 目录
-  /// 选择器。Windows：直接调用 explorer.exe 定位到目录。
+  /// Android：先原生侧枚举能打开目录的管理器，每个以显式意图置顶进
+  /// 系统「打开建议」面板（规避部分 OEM ROM"单匹配直接打开"的行为，
+  /// 实测 vivo 上表现为不弹面板直开系统文件管理器），主意图为 SAF
+  /// content:// 目录 URI（系统"文件"可直接定位）；全部失败时退回
+  /// SAF 目录选择器。Windows：直接调用 explorer.exe 定位到目录。
   static Future<bool> openFolder(String path) async {
     if (path.isEmpty) return false;
     if (Platform.isWindows) {

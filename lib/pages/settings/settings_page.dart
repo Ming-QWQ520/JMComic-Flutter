@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../core/protocol/jm_domain.dart';
+import '../../services/app_lock_service.dart';
 import '../../services/download_manager.dart';
 import '../../services/image_store.dart';
 import '../../services/storage_service.dart';
@@ -18,9 +19,33 @@ import '../user/about_page.dart';
 ///
 /// 分组：主题配色（6 套，紧凑布局）、线路选择（API/图片 + 测速）、
 /// DoH、阅读设置（方向/音量键/常亮/预加载）、个性化（自定义背景 +
-/// 透明度滑杆）、其他（清缓存）。
+/// 透明度滑杆）、安全（应用锁，仅 Android）、其他（清缓存）。
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
+
+  /// 开关应用锁：开启/关闭均需先通过一次本地认证，防止他人未授权改动。
+  Future<void> _toggleAppLock(BuildContext context, bool enable) async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    if (enable && !await AppLockService.instance.isDeviceSupported()) {
+      messenger.showSnackBar(const SnackBar(
+        content: Text('当前设备未设置锁屏密码或生物识别，无法开启应用锁'),
+      ));
+      return;
+    }
+    final ok = await AppLockService.instance
+        .authenticate(enable ? '验证身份以开启应用锁' : '验证身份以关闭应用锁');
+    if (!ok) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('认证未通过，应用锁设置未更改')),
+      );
+      return;
+    }
+    await state.setAppLockEnabled(enable);
+    messenger.showSnackBar(
+      SnackBar(content: Text(enable ? '应用锁已开启' : '应用锁已关闭')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -416,6 +441,25 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
+          // ---------- 安全 ----------
+          if (Platform.isAndroid) ...<Widget>[
+            SectionHeader(title: '安全'),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: SwitchListTile(
+                  dense: true,
+                  value: state.appLockEnabled,
+                  onChanged: (bool v) => _toggleAppLock(context, v),
+                  title: const Text('应用锁'),
+                  subtitle: Text(state.appLockEnabled
+                      ? '已开启：进入应用需通过指纹/面容/锁屏密码认证'
+                      : '使用手机本地指纹、面容或锁屏密码保护应用'),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+          ],
           // ---------- 其他 ----------
           SectionHeader(title: '其他'),
           Card(

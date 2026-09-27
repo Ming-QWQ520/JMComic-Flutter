@@ -14,6 +14,8 @@
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage"/>
+    <!-- 应用锁：生物识别（指纹/面容）+ 锁屏密码回退（local_auth/BiometricPrompt） -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
     <application
         android:label="JMComic-Flutter"
         android:name="${applicationName}"
@@ -43,42 +45,6 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
-        <!-- 桌面小组件：用户页 + 单部随机推荐（⟳ 原生换一部） -->
-        <receiver
-            android:name=".JmHomeWidgetProvider"
-            android:label="JM 漫画组件"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/jm_widget_info" />
-        </receiver>
-        <!-- 迷你小组件（2x1）：单部随机推荐 -->
-        <receiver
-            android:name=".JmQuickWidgetProvider"
-            android:label="随机推荐（迷你）"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/jm_quick_widget_info" />
-        </receiver>
-        <!-- 迷你小组件（1x1）：快速随机入口 -->
-        <receiver
-            android:name=".JmOpenWidgetProvider"
-            android:label="随机一部"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/jm_open_widget_info" />
-        </receiver>
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

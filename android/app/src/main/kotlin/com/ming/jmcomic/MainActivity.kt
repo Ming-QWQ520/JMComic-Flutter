@@ -5,7 +5,6 @@ import android.app.AlertDialog
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -17,7 +16,7 @@ import android.os.SystemClock
 import android.view.KeyEvent
 import android.view.WindowManager
 import android.widget.Toast
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -33,24 +32,25 @@ import java.io.File
  * - 存储权限（下载目录 /storage/emulated/0/Download/JM-Flutter）：
  *   - Android 10 及以下：运行时申请 WRITE/READ_EXTERNAL_STORAGE；
  *   - Android 11+：跳转"所有文件访问"（MANAGE_EXTERNAL_STORAGE）系统设置页。
- * - 打开文件夹：点击"打开下载文件夹"时弹出系统「打开建议」选择器。
- *   Intent.createChooser 生成的 ACTION_CHOOSER 是显式拉起系统选择面板，
- *   无论命中几个应用都必然弹出（不会被 ROM 静默改为直开）。主意图为
- *   SAF content:// 目录 URI（系统"文件"注册的打开方式，可定位到目录），
- *   file:// 各 MIME 变体经 EXTRA_ALTERNATE_INTENTS 并入同一面板
- *   （MT 管理器等第三方注册的是 file://）；全部失败时退回 SAF 目录
+ * - 打开文件夹：弹出系统「打开建议」选择器。先用 queryIntentActivities
+ *   枚举能打开目录的管理器（SAF content:// + file:// 各 MIME 形状），
+ *   每个管理器构造成显式意图经 EXTRA_INITIAL_INTENTS 置顶——面板
+ *   选项数 ≥2，规避部分 OEM ROM"单匹配直接打开"的行为（实测 vivo
+ *   上表现为不弹面板直开系统文件管理器）；全部失败时退回 SAF 目录
  *   选择器 / 系统"下载"管理器。
  * - openUrl：调起系统浏览器打开外部链接（B站/GitHub/抖音等）。
  * - shareText：调起系统分享面板（详情页分享按钮）。
  */
-class MainActivity : FlutterActivity() {
+// FlutterFragmentActivity：local_auth 的 BiometricPrompt 需要
+// FragmentActivity 宿主（应用锁指纹/面容/锁屏密码）。
+class MainActivity : FlutterFragmentActivity() {
 
     private var channel: MethodChannel? = null
     private var storageChannel: MethodChannel? = null
 
-    /// widget 通道引用：native → Flutter 的 jm_action / isAtRoot 必须
-    /// 发到 "com.ming.jmcomic/widget"（Flutter 端 WidgetBridge 在此通道
-    /// 上监听）。此前误用 volume 通道，widget 点击跳转/刷新永远无响应。
+    /// native → Flutter 通道引用：jm_action（快捷菜单跳转）/ isAtRoot
+    /// （双击退出）必须发到 "com.ming.jmcomic/widget"（Flutter 端
+    /// WidgetBridge 在此通道上监听）。此前误用 volume 通道导致无响应。
     private var widgetChannel: MethodChannel? = null
 
     /// 双击退出：首次返回键弹 Toast 提示，2 秒内再按一次才真正退出。
@@ -118,37 +118,15 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
-        // Widget bridge channel：Flutter 端向 widget 推送用户名 / 随机推荐；
-        // 同时作为 native → Flutter 的 jm_action / isAtRoot 通道
+        // Widget bridge channel：native → Flutter 的 jm_action
+        // （长按图标快捷菜单）与 isAtRoot（双击退出判断）通道，
+        // Flutter 端 WidgetBridge 在此监听。
         widgetChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.ming.jmcomic/widget"
         ).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "writeUserCard" -> {
-                        // 用户信息卡：名称/收藏/J币/经验（widget 用户页展示）
-                        val name = call.argument<String>("name")
-                        val fav = call.argument<String>("favorites") ?: "-"
-                        val coin = call.argument<String>("coin") ?: "-"
-                        val exp = call.argument<String>("exp") ?: "-"
-                        JmHomeWidgetProvider.writeUserCard(
-                            this@MainActivity, name, fav, coin, exp
-                        )
-                        result.success(true)
-                    }
-                    "writeRandomAlbums" -> {
-                        // 一批随机推荐：[{name,id,coverUrl}, ...]，
-                        // widget 按 ViewFlipper 多页轮播展示
-                        @Suppress("UNCHECKED_CAST")
-                        val albums =
-                            (call.argument<List<Any>>("albums") ?: emptyList())
-                                .filterIsInstance<Map<String, Any>>()
-                        JmHomeWidgetProvider.writeRandomAlbums(
-                            this@MainActivity, albums
-                        )
-                        result.success(true)
-                    }
                     "consumePendingAction" -> {
                         // 取出 shortcut / widget 点击时缓存的 action，
                         // 由 Flutter 端处理后清空
@@ -346,19 +324,23 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
         }
 
-        // Android 7+ 默认 StrictMode 会拦截 file:// 跨进程暴露。
-        // 备选意图仍使用 file://，这里放宽检测避免抛异常。
+        // Android 7+ 默认 StrictMode 会拦截 file:// 跨进程暴露；
+        // 目录无法走 FileProvider，这里放宽检测。
         try {
             StrictMode.setVmPolicy(StrictMode.VmPolicy.Builder().build())
         } catch (_: Exception) {
         }
 
-        // 百分百弹出系统「打开建议」的关键：用 Intent.createChooser
-        // （ACTION_CHOOSER）显式拉起系统选择面板——它无论解析出几个
-        // 应用都必然显示面板，系统不会静默直开。上一版用
-        // ACTION_GET_CONTENT + type=*/* 是"挑文件"语义，会被系统
-        // 文件选择器独占解析，表现为直接打开文件挑选页。
+        // 调研结论：部分 OEM ROM（vivo 等）在 chooser 目标意图仅解析出
+        // 一个应用时会抑制选择面板、直接打开该应用——上一版 SAF
+        // content:// 主意图只有系统"文件"能处理，表现为"直接打开系统
+        // 的文件管理器"。百分百弹出「打开建议」的做法：先用
+        // queryIntentActivities 枚举设备上所有能打开目录的管理器
+        //（manifest <queries> 已声明各形状），把每个管理器构造成显式
+        // 意图（setComponent）经 EXTRA_INITIAL_INTENTS 置顶——面板中
+        // 选项数 ≥2，任何 ROM 都会正常弹出选择面板。
         val fileUri = Uri.fromFile(dir)
+        val grantFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
         val safDocUri: Uri? = try {
             toSafInitialUri(path)?.let {
                 android.provider.DocumentsContract.buildDocumentUri(
@@ -369,61 +351,89 @@ class MainActivity : FlutterActivity() {
             null
         }
 
-        // 主意图：SAF content:// 目录 URI——系统"文件"注册的打开方式，
-        // 可直接定位到下载文件夹；构建失败时退回 file:// 变体。
-        val target = Intent(Intent.ACTION_VIEW).apply {
-            if (safDocUri != null) {
-                setDataAndType(
-                    safDocUri,
-                    android.provider.DocumentsContract.Document.MIME_TYPE_DIR
-                )
-            } else {
-                setDataAndType(fileUri, "resource/directory")
-            }
-            addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                    Intent.FLAG_ACTIVITY_NEW_TASK
-            )
+        // 候选形状：首条作为 chooser 主意图，其余用于枚举置顶项。
+        val probes = ArrayList<Pair<Uri, String>>()
+        if (safDocUri != null) {
+            probes.add(Pair(
+                safDocUri,
+                android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+            ))
         }
-
-        // 备选意图：file:// 各 MIME 变体——MT 管理器等第三方文件管理器
-        // 注册的是 file:// + resource/directory（或 resource/folder /
-        // vnd.android.document/directory）。EXTRA_ALTERNATE_INTENTS 让
-        // 选择器把主意图与备选意图的处理程序合并进同一份"系统建议"，
-        // 系统文件与 MT 管理器会同时出现在列表中。
-        val alternates = ArrayList<Intent>()
         for (mime in listOf(
-            "resource/directory",
+            "resource/directory",          // MT 管理器等第三方注册的形状
             "resource/folder",
             "vnd.android.document/directory"
         )) {
-            if (safDocUri == null && mime == "resource/directory") {
-                continue // 已是主意图，避免面板重复
+            probes.add(Pair(fileUri, mime))
+        }
+
+        val target = Intent(Intent.ACTION_VIEW).apply {
+            val first = probes.first()
+            setDataAndType(first.first, first.second)
+            addFlags(grantFlags or Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        // 主意图的处理程序由 chooser 正常解析展示，不进置顶列表，
+        // 避免面板出现重复项。
+        val targetResolvers = HashSet<android.content.ComponentName>()
+        try {
+            for (ri in packageManager.queryIntentActivities(target, 0)) {
+                val info = ri.activityInfo ?: continue
+                targetResolvers.add(
+                    android.content.ComponentName(info.packageName, info.name)
+                )
             }
-            alternates.add(
-                Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(fileUri, mime)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) {
+        }
+
+        // 把其余管理器逐个构造成显式意图置顶，保证系统"文件"与
+        // MT 管理器等同时出现在「打开建议」中。
+        val initials = LinkedHashMap<android.content.ComponentName, Intent>()
+        for (i in 1 until probes.size) {
+            val uri = probes[i].first
+            val mime = probes[i].second
+            val probe = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, mime)
+                .addFlags(grantFlags)
+            try {
+                for (ri in packageManager.queryIntentActivities(probe, 0)) {
+                    val info = ri.activityInfo ?: continue
+                    val cn = android.content.ComponentName(
+                        info.packageName, info.name
+                    )
+                    if (targetResolvers.contains(cn) || initials.containsKey(cn)) {
+                        continue
+                    }
+                    initials[cn] = Intent(Intent.ACTION_VIEW).apply {
+                        setComponent(cn)
+                        setDataAndType(uri, mime)
+                        addFlags(grantFlags)
+                    }
                 }
-            )
+            } catch (_: Exception) {
+            }
+        }
+
+        // 一个管理器都枚举不到（可见性/形状异常）时不弹空面板，
+        // 直接走 SAF 目录选择器 / 系统"下载"管理器兜底。
+        if (targetResolvers.isEmpty() && initials.isEmpty()) {
+            return openSafFallback(path)
         }
 
         val chooser = Intent.createChooser(target, "打开文件夹").apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            putExtra(Intent.EXTRA_ALTERNATE_INTENTS, alternates.toTypedArray())
+            if (initials.isNotEmpty()) {
+                putExtra(
+                    Intent.EXTRA_INITIAL_INTENTS,
+                    initials.values.toTypedArray()
+                )
+            }
         }
         return try {
             startActivity(chooser)
             true
         } catch (_: Exception) {
-            // 极端情况（无系统选择器）退回直开主意图，再失败走
-            // SAF 目录选择器 / 系统"下载"管理器兜底。
-            try {
-                startActivity(target)
-                true
-            } catch (_: Exception) {
-                openSafFallback(path)
-            }
+            openSafFallback(path)
         }
     }
 

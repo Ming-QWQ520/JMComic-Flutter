@@ -17,6 +17,7 @@ import 'pages/user/login_page.dart';
 import 'services/widget_bridge.dart';
 import 'shell/root_page.dart';
 import 'state/app_state.dart';
+import 'widgets/app_lock_gate.dart';
 
 /// 全局滚动行为：桌面端（Windows）默认只有触摸才能拖拽列表，
 /// 鼠标按住首页横滑分区/漫画网格拖不动。这里把鼠标/触控笔/触控板
@@ -44,7 +45,11 @@ class JmComicApp extends StatelessWidget {
       builder: (BuildContext context, AppState state, _) {
         final scheme = state.scheme;
         final hasBg = state.hasCustomBackground;
-        return MaterialApp(
+        // 应用锁门卫：仅 Android 生效（Windows 无本地认证实现）。
+        // 遮罩位于 MaterialApp 之上，任何页面都无法绕过锁定层。
+        return AppLockGate(
+          enabled: Platform.isAndroid && state.appLockEnabled,
+          child: MaterialApp(
           navigatorKey: rootNavigatorKey,
           title: 'JMComic-Flutter',
           theme: AppTheme.light(scheme, hasBg, state.cardOpacity),
@@ -154,6 +159,7 @@ class JmComicApp extends StatelessWidget {
           // 监听路由变化以同步 isAtRoot：路由栈只剩 1 项时（RootPage）
           // isAtRoot=true，否则 false。用于 Android 双击退出判断。
           navigatorObservers: <NavigatorObserver>[_RootObserver()],
+          ),
         );
       },
     );

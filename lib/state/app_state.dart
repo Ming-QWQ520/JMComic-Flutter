@@ -11,7 +11,6 @@ import '../core/protocol/models.dart';
 import '../services/download_manager.dart';
 import '../services/github_service.dart';
 import '../services/local_store.dart';
-import '../services/widget_bridge.dart';
 
 /// 阅读方向。
 enum ReadDirection { vertical, horizontal, rightToLeft }
@@ -53,12 +52,7 @@ class AppState extends ChangeNotifier {
     _cardOpacity = _store.getIntSync('card_opacity', 100) / 100.0;
     if (_cardOpacity < 0) _cardOpacity = 0;
     if (_cardOpacity > 1) _cardOpacity = 1;
-    // 桌面小组件「刷新」按钮 → 原生拉起 APP（jm_action=widget_refresh）
-    // → WidgetBridge 分发 → 重新拉取一批随机推荐写回 widget。
-    WidgetBridge.instance.registerAction(
-      'widget_refresh',
-      (_) => refreshWidgetRandomAlbum(),
-    );
+    _appLockEnabled = _store.getBoolSync('app_lock_enabled', false);
   }
 
   final JmApi api = JmApi.instance;
@@ -126,6 +120,18 @@ class AppState extends ChangeNotifier {
   /// 用于在背景图较亮时降低前景 UI 的视觉权重以突出背景。
   double _cardOpacity = 1.0;
   double get cardOpacity => _cardOpacity;
+
+  // ---------- 应用锁（local_auth：指纹/面容/锁屏密码） ----------
+  /// 开启后：冷启动与切后台返回时要求本地认证解锁。
+  bool _appLockEnabled = false;
+  bool get appLockEnabled => _appLockEnabled;
+
+  /// 写入应用锁开关（设置页在本地认证通过后才调用）。
+  Future<void> setAppLockEnabled(bool v) async {
+    _appLockEnabled = v;
+    notifyListeners();
+    await _store.setBool('app_lock_enabled', v);
+  }
 
   // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
   int? _repoStars;
@@ -230,25 +236,6 @@ class AppState extends ChangeNotifier {
     // 切后台再回到前台不会重新走 init()，符合"每次进入 APP 请求一次"的
     // 定义；失败静默（GitHub 在部分网络下不可达，不影响使用）。
     _fetchRepoStars();
-
-    // 桌面小组件数据同步：用户信息卡（如有）+ 随机推荐一次。
-    _syncUserCard();
-    unawaited(refreshWidgetRandomAlbum());
-  }
-
-  /// 把当前登录用户信息卡（名称/收藏/J币/经验）同步到桌面小组件。
-  void _syncUserCard() {
-    final u = _user;
-    if (u == null) {
-      unawaited(WidgetBridge.instance.writeUserCard(name: '未登录'));
-      return;
-    }
-    unawaited(WidgetBridge.instance.writeUserCard(
-      name: u.username,
-      favorites: '${u.albumFavorites}/${u.albumFavoritesMax}',
-      coin: '${u.coin}',
-      exp: '${u.exp}',
-    ));
   }
 
   /// 拉取 GitHub 仓库 Star 数（fire-and-forget，失败保留 null）。
@@ -424,8 +411,6 @@ class AppState extends ChangeNotifier {
     await _store.setString('jwt', user.jwtToken);
     await _store.setString('avs', user.s);
     await _store.setJson('user', user.toMap());
-    // 同步用户信息卡到桌面小组件（名称/收藏/J币/经验）
-    _syncUserCard();
   }
 
   /// 从服务端拉取最新用户信息并本地落盘（购买/签到后同步 J币等）。
@@ -446,8 +431,6 @@ class AppState extends ChangeNotifier {
       _c.setAuth(merged.jwtToken, merged.s);
       notifyListeners();
       await _store.setJson('user', merged.toMap());
-      // J币/经验/收藏可能变化：同步用户信息卡到桌面小组件
-      _syncUserCard();
     } catch (_) {}
   }
 
@@ -458,27 +441,5 @@ class AppState extends ChangeNotifier {
     await _store.remove('jwt');
     await _store.remove('avs');
     await _store.remove('user');
-    // 同步退出状态到桌面小组件
-    _syncUserCard();
-  }
-
-  /// 拉取一部随机推荐并写入桌面小组件（冷启动预填；widget 上的 ⟳
-  /// 由原生直接请求，不经过这里）。
-  Future<void> refreshWidgetRandomAlbum() async {
-    try {
-      final list = await api.getRandomRecommend();
-      if (list.isEmpty) return;
-      final a = list.first;
-      final albums = <Map<String, String>>[
-        <String, String>{
-          'name': a.name,
-          'id': a.id,
-          'coverUrl': api.coverUrl(a.id, updateAt: a.updateAt),
-        },
-      ];
-      await WidgetBridge.instance.writeRandomAlbums(albums);
-    } catch (_) {
-      // 静默失败：widget 不应阻塞主流程
-    }
   }
 }

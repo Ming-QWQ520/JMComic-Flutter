@@ -26,6 +26,10 @@ dependencies:
   path_provider: ^2.1.4
   # 自定义背景图选择（Android SAF / Windows 原生文件对话框，纯 Kotlin/C++ 实现，无 NDK）
   file_selector: ^1.1.0
+  # 应用锁：手机本地认证（指纹/面容/锁屏密码、图案）
+  local_auth: ^3.0.2
+  # 应用锁 Android 端实现（直接 import 其 AndroidAuthMessages 中文化提示框）
+  local_auth_android: ^2.2.0
 
 dev_dependencies:
   flutter_test:
