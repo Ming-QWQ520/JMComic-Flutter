@@ -5,9 +5,9 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/警告-这里填写你的警告内容-red?style=for-the-badge" alt="警告">
+  <img src="https://img.shields.io/badge/警-red?style=for-the-badge" alt="警告">
 </p>
-**此项目包含R18、一些血腥暴力和猎奇内容，未满18请勿使用，所产生的一切后果与项目开发者无关**
+ **此项目包含R18、一些血腥暴力和猎奇内容，未满18请勿使用，所产生的一切后果与项目开发者无关**
 
 
 一个使用 **Flutter 3.47.5 (Dart 3.13.4)** 开发的跨平台（Android / Windows）漫画阅读客户端。**仅供学习研究，请勿用于商业用途；请于下载后 24 小时内删除，请支持正版。**
