@@ -311,7 +311,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
     Navigator.pushNamed(context, '/login');
   }
 
-  void _openReader({String chapterId = ''}) {
+  void _openReader({String chapterId = '', int page = 0}) {
     Navigator.pushNamed(
       context,
       '/reader',
@@ -319,6 +319,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
         'albumId': _album!.id.toString(),
         'chapterId': chapterId.isEmpty ? _album!.id.toString() : chapterId,
         'title': _album!.name,
+        // 单章漫画目录页码直达（0/空 = 从头开始）
+        'page': page > 0 ? '$page' : '',
       },
     );
   }
@@ -1076,7 +1078,7 @@ class _CatalogTab extends StatelessWidget {
 
   final SliverOverlapAbsorberHandle handle;
   final Album album;
-  final void Function({String chapterId}) onOpenReader;
+  final void Function({String chapterId, int page}) onOpenReader;
 
   @override
   Widget build(BuildContext context) {
@@ -1089,35 +1091,54 @@ class _CatalogTab extends StatelessWidget {
           if (album.series.isEmpty)
             SliverPadding(
               padding: const EdgeInsets.all(16),
-              sliver: SliverGrid(
-                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 88,
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 1.5,
-                ),
-                delegate: SliverChildBuilderDelegate(
-                  (BuildContext c, int i) {
-                    return Material(
-                      color: cs.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(10),
-                        onTap: () => onOpenReader(),
-                        child: Center(
-                          child: Text(
-                            '${i + 1}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              color: cs.primary,
-                            ),
-                          ),
+              sliver: SliverMainAxisGroup(
+                slivers: <Widget>[
+                  // 单章漫画（无章节列表）说明：这里的数字是页码而非章节，
+                  // 点击可直达对应页。
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        '单章作品 · 共 ${album.totalPhotos} 页（点击页码直达该页）',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: cs.onSurfaceVariant,
                         ),
                       ),
-                    );
-                  },
-                  childCount: album.totalPhotos,
-                ),
+                    ),
+                  ),
+                  SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 88,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1.5,
+                    ),
+                    delegate: SliverChildBuilderDelegate(
+                      (BuildContext c, int i) {
+                        return Material(
+                          color: cs.primary.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => onOpenReader(page: i + 1),
+                            child: Center(
+                              child: Text(
+                                '${i + 1}',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: cs.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                      childCount: album.totalPhotos,
+                    ),
+                  ),
+                ],
               ),
             )
           else
@@ -1211,7 +1232,7 @@ class _ChapterGroupCard extends StatefulWidget {
 
   final List<SeriesItem> group;
 
-  final void Function({String chapterId}) onOpenReader;
+  final void Function({String chapterId, int page}) onOpenReader;
 
   @override
   State<_ChapterGroupCard> createState() => _ChapterGroupCardState();

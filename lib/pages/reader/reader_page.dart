@@ -45,6 +45,8 @@ class _ReaderPageState extends State<ReaderPage> {
   String _albumId = '';
   String _chapterId = '';
   String _title = '';
+  /// 单章漫画页码直达：目录页点页码进入时携带（1-based，0 = 从头）。
+  int _initialPage = 0;
   bool _loading = true;
   String _error = '';
   List<ReadImage> _images = <ReadImage>[];
@@ -88,6 +90,7 @@ class _ReaderPageState extends State<ReaderPage> {
       _albumId = args['albumId'] ?? '';
       _chapterId = args['chapterId'] ?? '';
       _title = args['title'] ?? '';
+      _initialPage = int.tryParse(args['page'] ?? '') ?? 0;
       _load();
       _setupNative();
     }
@@ -172,6 +175,17 @@ class _ReaderPageState extends State<ReaderPage> {
       if (_images.isNotEmpty) {
         _loadImage(0);
         _preload(1);
+        // 单章漫画页码直达：图片就绪后跳到指定页（用估算定位，
+        // 竖屏模式落点后由现有逐帧校正逻辑修正）。
+        if (_initialPage > 1 && _initialPage <= _images.length) {
+          final target = _initialPage - 1;
+          _initialPage = 0;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _jumpToPage(target);
+          });
+        } else {
+          _initialPage = 0;
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -533,6 +547,14 @@ class _ReaderPageState extends State<ReaderPage> {
                             .catchError((_) {});
                       },
                     ),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('显示线路切换按键'),
+                      subtitle: const Text('常驻于阅读界面左下角，可在图片'
+                          '加载异常时快速切换图片线路'),
+                      value: app.readerLineButton,
+                      onChanged: (bool v) => app.setReaderLineButton(v),
+                    ),
                     Row(
                       children: <Widget>[
                         const Text('预加载页数'),
@@ -658,6 +680,37 @@ class _ReaderPageState extends State<ReaderPage> {
                   child: _buildBottomOverlay(),
                 ),
               ),
+            ),
+          ),
+          // 图片线路切换按键：常驻左下角（上下弹窗渐隐时不消失），
+          // 可在阅读设置中开关。置于弹窗之后保证始终可点。
+          Positioned(
+            left: 10,
+            bottom: 12,
+            child: Consumer<AppState>(
+              builder: (BuildContext c, AppState app, _) {
+                if (!app.readerLineButton) return const SizedBox.shrink();
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(21),
+                    onTap: _showImgLineSheet,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.35),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.dns_rounded,
+                        color: Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -1063,15 +1116,6 @@ class _ReaderPageState extends State<ReaderPage> {
                     ),
                   ),
                 ),
-                // 图片线路切换：可直接换线路，也可测速后再选
-                IconButton(
-                  tooltip: '图片线路',
-                  icon: const Icon(
-                    Icons.dns_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: _showImgLineSheet,
-                ),
               ],
             ),
           ),
@@ -1194,8 +1238,10 @@ class _ReaderPageState extends State<ReaderPage> {
                     ),
                   ),
                 // —— 底部弹窗操作行：设置 + 深色/浅色 ——
+                // 左下角常驻线路按键开启时预留其宽度，避免遮挡。
                 Row(
                   children: <Widget>[
+                    if (app.readerLineButton) const SizedBox(width: 46),
                     _OverlayAction(
                       icon: Icons.tune_rounded,
                       label: '设置',

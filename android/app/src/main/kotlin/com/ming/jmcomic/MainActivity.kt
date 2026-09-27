@@ -3,8 +3,10 @@ package com.ming.jmcomic
 import android.Manifest
 import android.app.AlertDialog
 import android.app.DownloadManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -13,8 +15,15 @@ import android.os.Handler
 import android.os.Looper
 import android.os.StrictMode
 import android.os.SystemClock
+import android.util.TypedValue
+import android.view.Gravity
 import android.view.KeyEvent
+import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import android.widget.Toast
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -32,12 +41,11 @@ import java.io.File
  * - 存储权限（下载目录 /storage/emulated/0/Download/JM-Flutter）：
  *   - Android 10 及以下：运行时申请 WRITE/READ_EXTERNAL_STORAGE；
  *   - Android 11+：跳转"所有文件访问"（MANAGE_EXTERNAL_STORAGE）系统设置页。
- * - 打开文件夹：弹出系统「打开建议」选择器。先用 queryIntentActivities
- *   枚举能打开目录的管理器（SAF content:// + file:// 各 MIME 形状），
- *   每个管理器构造成显式意图经 EXTRA_INITIAL_INTENTS 置顶——面板
- *   选项数 ≥2，规避部分 OEM ROM"单匹配直接打开"的行为（实测 vivo
- *   上表现为不弹面板直开系统文件管理器）；全部失败时退回 SAF 目录
- *   选择器 / 系统"下载"管理器。
+ * - 打开文件夹：应用内自绘「打开方式」列表——枚举能打开目录的管理器
+ *   （SAF content:// + file:// 各 MIME 形状），点击后以显式意图直接
+ *   启动，不经过系统 ResolverActivity（vivo 等定制 ROM 会把系统选择
+ *   器静默改写为直开单个应用，实测三次迭代均被吞，故彻底自绘）；
+ *   列表末尾附 SAF 目录选择器兜底，全部失败退回系统"下载"管理器。
  * - openUrl：调起系统浏览器打开外部链接（B站/GitHub/抖音等）。
  * - shareText：调起系统分享面板（详情页分享按钮）。
  */
@@ -331,14 +339,13 @@ class MainActivity : FlutterFragmentActivity() {
         } catch (_: Exception) {
         }
 
-        // 调研结论：部分 OEM ROM（vivo 等）在 chooser 目标意图仅解析出
-        // 一个应用时会抑制选择面板、直接打开该应用——上一版 SAF
-        // content:// 主意图只有系统"文件"能处理，表现为"直接打开系统
-        // 的文件管理器"。百分百弹出「打开建议」的做法：先用
-        // queryIntentActivities 枚举设备上所有能打开目录的管理器
-        //（manifest <queries> 已声明各形状），把每个管理器构造成显式
-        // 意图（setComponent）经 EXTRA_INITIAL_INTENTS 置顶——面板中
-        // 选项数 ≥2，任何 ROM 都会正常弹出选择面板。
+        // 彻底方案：不再依赖系统选择器。vivo 等定制 ROM 会把
+        // createChooser（含 EXTRA_INITIAL_INTENTS 显式置顶）静默改写成
+        // 直开单个应用——系统侧三次迭代均被吞（实测实锤）。这里改为
+        // 应用内自绘「打开方式」列表：queryIntentActivities 枚举设备上
+        // 能打开目录的管理器（manifest <queries> 已声明各形状），点击
+        // 后用显式意图（setComponent）直接启动，全过程不经过系统
+        // ResolverActivity，任何 ROM 上行为一致、百分百弹窗。
         val fileUri = Uri.fromFile(dir)
         val grantFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
         val safDocUri: Uri? = try {
@@ -351,7 +358,8 @@ class MainActivity : FlutterFragmentActivity() {
             null
         }
 
-        // 候选形状：首条作为 chooser 主意图，其余用于枚举置顶项。
+        // 探测形状：优先 SAF content://（管理器可直接定位到该目录），
+        // 其次 file:// 各 MIME 变体（MT 管理器等第三方注册的形状）。
         val probes = ArrayList<Pair<Uri, String>>()
         if (safDocUri != null) {
             probes.add(Pair(
@@ -360,81 +368,142 @@ class MainActivity : FlutterFragmentActivity() {
             ))
         }
         for (mime in listOf(
-            "resource/directory",          // MT 管理器等第三方注册的形状
+            "resource/directory",
             "resource/folder",
             "vnd.android.document/directory"
         )) {
             probes.add(Pair(fileUri, mime))
         }
 
-        val target = Intent(Intent.ACTION_VIEW).apply {
-            val first = probes.first()
-            setDataAndType(first.first, first.second)
-            addFlags(grantFlags or Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-
-        // 主意图的处理程序由 chooser 正常解析展示，不进置顶列表，
-        // 避免面板出现重复项。
-        val targetResolvers = HashSet<android.content.ComponentName>()
-        try {
-            for (ri in packageManager.queryIntentActivities(target, 0)) {
-                val info = ri.activityInfo ?: continue
-                targetResolvers.add(
-                    android.content.ComponentName(info.packageName, info.name)
-                )
-            }
-        } catch (_: Exception) {
-        }
-
-        // 把其余管理器逐个构造成显式意图置顶，保证系统"文件"与
-        // MT 管理器等同时出现在「打开建议」中。
-        val initials = LinkedHashMap<android.content.ComponentName, Intent>()
-        for (i in 1 until probes.size) {
-            val uri = probes[i].first
-            val mime = probes[i].second
+        // 枚举：同一应用只保留第一个命中的形状（SAF 优先，体验最好）。
+        val found = LinkedHashMap<String, Pair<ResolveInfo, Intent>>()
+        for ((uri, mime) in probes) {
             val probe = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, mime)
                 .addFlags(grantFlags)
-            try {
-                for (ri in packageManager.queryIntentActivities(probe, 0)) {
-                    val info = ri.activityInfo ?: continue
-                    val cn = android.content.ComponentName(
-                        info.packageName, info.name
-                    )
-                    if (targetResolvers.contains(cn) || initials.containsKey(cn)) {
-                        continue
-                    }
-                    initials[cn] = Intent(Intent.ACTION_VIEW).apply {
-                        setComponent(cn)
-                        setDataAndType(uri, mime)
-                        addFlags(grantFlags)
-                    }
-                }
+            val infos = try {
+                packageManager.queryIntentActivities(probe, 0)
             } catch (_: Exception) {
+                emptyList<ResolveInfo>()
             }
-        }
-
-        // 一个管理器都枚举不到（可见性/形状异常）时不弹空面板，
-        // 直接走 SAF 目录选择器 / 系统"下载"管理器兜底。
-        if (targetResolvers.isEmpty() && initials.isEmpty()) {
-            return openSafFallback(path)
-        }
-
-        val chooser = Intent.createChooser(target, "打开文件夹").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            if (initials.isNotEmpty()) {
-                putExtra(
-                    Intent.EXTRA_INITIAL_INTENTS,
-                    initials.values.toTypedArray()
+            for (ri in infos) {
+                val info = ri.activityInfo ?: continue
+                val key = "${info.packageName}/${info.name}"
+                if (found.containsKey(key)) continue
+                found[key] = Pair(
+                    ri,
+                    Intent(Intent.ACTION_VIEW)
+                        .setComponent(
+                            ComponentName(info.packageName, info.name)
+                        )
+                        .setDataAndType(uri, mime)
+                        .addFlags(grantFlags)
                 )
             }
         }
-        return try {
-            startActivity(chooser)
-            true
-        } catch (_: Exception) {
+
+        // 一个管理器都枚举不到（可见性/形状异常）时不出空列表，
+        // 直接走 SAF 目录选择器 / 系统"下载"管理器兜底。
+        if (found.isEmpty()) {
+            return openSafFallback(path)
+        }
+        showOpenWithDialog(path, found.values.toList())
+        return true
+    }
+
+    /// 应用内「打开方式」列表：图标 + 应用名逐行排列，点击后以显式
+    /// 意图直接启动对应管理器；末尾附一条 SAF 目录选择器兜底（所选
+    /// 管理器打不开目录时可用）。
+    private fun showOpenWithDialog(
+        path: String,
+        entries: List<Pair<ResolveInfo, Intent>>,
+    ) {
+        val pm = packageManager
+        val density = resources.displayMetrics.density
+        val pad = (16 * density).toInt()
+        val iconSize = (36 * density).toInt()
+        val selector = TypedValue()
+        theme.resolveAttribute(
+            android.R.attr.selectableItemBackground, selector, true
+        )
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("打开方式")
+            .setNegativeButton("取消", null)
+            .create()
+        val list = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        for ((info, launch) in entries) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(pad, pad / 2, pad, pad / 2)
+                isClickable = true
+                isFocusable = true
+                setBackgroundResource(selector.resourceId)
+            }
+            val icon = ImageView(this).apply {
+                setImageDrawable(info.loadIcon(pm))
+                layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            }
+            val label = TextView(this).apply {
+                text = info.loadLabel(pm).toString()
+                textSize = 16f
+                layoutParams = LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f,
+                ).apply { marginStart = (14 * density).toInt() }
+            }
+            row.addView(icon)
+            row.addView(label)
+            row.setOnClickListener {
+                dialog.dismiss()
+                try {
+                    startActivity(launch)
+                } catch (_: Exception) {
+                    Toast.makeText(
+                        this@MainActivity, "无法启动该应用", Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+            list.addView(row)
+        }
+
+        // 末尾兜底行：SAF 目录选择器（含初始位置提示）。
+        val fallbackRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(pad, pad / 2, pad, pad / 2)
+            isClickable = true
+            isFocusable = true
+            setBackgroundResource(selector.resourceId)
+        }
+        val fallbackIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_manage)
+            layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+        }
+        val fallbackLabel = TextView(this).apply {
+            text = "其他 · 使用 SAF 目录选择器"
+            textSize = 16f
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f,
+            ).apply { marginStart = (14 * density).toInt() }
+        }
+        fallbackRow.addView(fallbackIcon)
+        fallbackRow.addView(fallbackLabel)
+        fallbackRow.setOnClickListener {
+            dialog.dismiss()
             openSafFallback(path)
         }
+        list.addView(fallbackRow)
+
+        dialog.setView(ScrollView(this).apply { addView(list) })
+        dialog.show()
     }
 
     /// SAF 目录选择器 + 系统下载管理器 兜底。

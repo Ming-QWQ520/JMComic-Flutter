@@ -47,11 +47,11 @@ class StorageService {
 
   /// 调用系统文件管理器打开文件夹。
   ///
-  /// Android：先原生侧枚举能打开目录的管理器，每个以显式意图置顶进
-  /// 系统「打开建议」面板（规避部分 OEM ROM"单匹配直接打开"的行为，
-  /// 实测 vivo 上表现为不弹面板直开系统文件管理器），主意图为 SAF
-  /// content:// 目录 URI（系统"文件"可直接定位）；全部失败时退回
-  /// SAF 目录选择器。Windows：直接调用 explorer.exe 定位到目录。
+  /// Android：原生侧枚举能打开目录的管理器（SAF content:// + file://
+  /// 各 MIME 形状），弹出应用内「打开方式」列表，点击后以显式意图
+  /// 直接启动——不经过系统 ResolverActivity（vivo 等定制 ROM 会把
+  /// 系统选择器静默改写为直开单个应用），任何 ROM 行为一致；列表
+  /// 末尾附 SAF 目录选择器兜底。Windows：直接调用 explorer.exe。
   static Future<bool> openFolder(String path) async {
     if (path.isEmpty) return false;
     if (Platform.isWindows) {

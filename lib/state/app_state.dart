@@ -53,6 +53,7 @@ class AppState extends ChangeNotifier {
     if (_cardOpacity < 0) _cardOpacity = 0;
     if (_cardOpacity > 1) _cardOpacity = 1;
     _appLockEnabled = _store.getBoolSync('app_lock_enabled', false);
+    _readerLineButton = _store.getBoolSync('reader_line_button', true);
   }
 
   final JmApi api = JmApi.instance;
@@ -131,6 +132,16 @@ class AppState extends ChangeNotifier {
     _appLockEnabled = v;
     notifyListeners();
     await _store.setBool('app_lock_enabled', v);
+  }
+
+  /// 阅读界面常驻线路切换按键（左下角）开关，默认开启。
+  bool _readerLineButton = true;
+  bool get readerLineButton => _readerLineButton;
+
+  Future<void> setReaderLineButton(bool v) async {
+    _readerLineButton = v;
+    notifyListeners();
+    await _store.setBool('reader_line_button', v);
   }
 
   // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
