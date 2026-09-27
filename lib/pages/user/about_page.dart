@@ -173,27 +173,50 @@ class AboutPage extends StatelessWidget {
           // ---------- 检测更新 ----------
           const _UpdateSection(),
           const SizedBox(height: 14),
-          // ---------- Star 数 ----------
+          // ---------- Star 数 / 开源协议 ----------
           SectionHeader(title: '项目数据'),
           Card(
-            child: ListTile(
-              leading: Icon(Icons.star_rounded,
-                  size: 24, color: const Color(0xFFF5B301)),
-              title: const Text('GitHub Stars'),
-              trailing: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: Text(
-                  state.repoStars?.toString() ?? '…',
-                  key: ValueKey<int?>(state.repoStars),
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: cs.primary,
-                    fontFamily: 'monospace',
+            child: Column(
+              children: <Widget>[
+                ListTile(
+                  leading: Icon(Icons.star_rounded,
+                      size: 24, color: const Color(0xFFF5B301)),
+                  title: const Text('GitHub Stars'),
+                  trailing: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 300),
+                    child: Text(
+                      state.repoStars?.toString() ?? '…',
+                      key: ValueKey<int?>(state.repoStars),
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: cs.primary,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                  onTap: () => StorageService.openUrl(_repoUrl),
+                ),
+                Divider(
+                  height: 0.6,
+                  indent: 16,
+                  endIndent: 16,
+                  color: cs.outlineVariant.withValues(alpha: 0.5),
+                ),
+                ListTile(
+                  dense: true,
+                  leading: Icon(Icons.gavel_rounded,
+                      size: 22, color: cs.primary),
+                  title: const Text('开源协议'),
+                  subtitle: Text(
+                    state.repoLicense ?? '未声明（仅供学习研究）',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  onTap: () => StorageService.openUrl(
+                    '$_repoUrl/blob/main/LICENSE',
                   ),
                 ),
-              ),
-              onTap: () => StorageService.openUrl(_repoUrl),
+              ],
             ),
           ),
           const SizedBox(height: 14),
@@ -275,10 +298,53 @@ class _UpdateSectionState extends State<_UpdateSection> {
   double _progress = 0;
   String _status = '';
 
+  /// 设备主 ABI（冷启动后异步获取），用于挑选最优更新 APK。
+  String _abi = '';
+
+  @override
+  void initState() {
+    super.initState();
+    StorageService.getDeviceAbi().then((String abi) {
+      if (mounted) setState(() => _abi = abi);
+    });
+  }
+
   bool get _hasUpdate {
     final r = _latest;
     if (r == null || r.version.isEmpty) return false;
     return GithubService.isNewerVersion(r.version, kAppVersion);
+  }
+
+  /// 按设备 ABI 挑选最优 APK：
+  /// - arm64-v8a 设备 → arm64 专用包，缺失回退 universal；
+  /// - armeabi-v7a 设备 → 32 位包（arm64 包不兼容），缺失回退 universal；
+  /// - x86_64 设备 → x86_64 包，缺失回退 universal；
+  /// - 其他/未知 → universal。
+  String _pickApk(ReleaseInfo r) {
+    final urls = r.abiUrls;
+    switch (_abi) {
+      case 'arm64-v8a':
+        return urls['arm64-v8a'] ?? urls['universal'] ?? r.apkUrl;
+      case 'armeabi-v7a':
+        return urls['armeabi-v7a'] ?? urls['universal'] ?? r.apkUrl;
+      case 'x86_64':
+        return urls['x86_64'] ?? urls['universal'] ?? r.apkUrl;
+      default:
+        return urls['universal'] ?? r.apkUrl;
+    }
+  }
+
+  String _pickedArch(ReleaseInfo r) {
+    final url = _pickApk(r);
+    for (final arch in const <String>[
+      'universal',
+      'arm64-v8a',
+      'armeabi-v7a',
+      'x86_64',
+    ]) {
+      if (url.contains(arch)) return arch;
+    }
+    return 'apk';
   }
 
   Future<void> _check() async {
@@ -304,19 +370,20 @@ class _UpdateSectionState extends State<_UpdateSection> {
       await StorageService.openUrl(r.htmlUrl);
       return;
     }
+    final url = _pickApk(r);
+    final arch = _pickedArch(r);
     setState(() {
       _downloading = true;
       _progress = 0;
-      _status = '准备下载…';
+      _status = '准备下载（$arch）…';
     });
     try {
       final base = await getExternalStorageDirectory();
       final updateDir = Directory('${base!.path}/update');
       await updateDir.create(recursive: true);
-      final savePath =
-          '${updateDir.path}/JMComic-Flutter-v${r.version}-arm64-v8a.apk';
+      final savePath = '$updateDir/JMComic-Flutter-v${r.version}-$arch.apk';
       final file = await GithubService.downloadUpdate(
-        url: r.apkUrl,
+        url: url,
         savePath: savePath,
         onProgress: (double p) {
           if (mounted) setState(() => _progress = p);

@@ -3,13 +3,16 @@ import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
-/// 仓库元信息（Star 数 + 简介，简介来自 GitHub API 的 description，
-/// 不再在应用内硬编码）。
+/// 仓库元信息（Star 数 + 简介 + 开源协议，均来自 GitHub API，
+/// 不在应用内硬编码）。
 class RepoMeta {
-  const RepoMeta({this.stars, this.description});
+  const RepoMeta({this.stars, this.description, this.license});
 
   final int? stars;
   final String? description;
+
+  /// 开源协议 SPDX ID（如 MIT；仓库未声明时为 null）。
+  final String? license;
 }
 
 /// 最新 Release 信息。
@@ -23,9 +26,10 @@ class ReleaseInfo {
     required this.body,
     required this.apkUrl,
     required this.htmlUrl,
+    this.abiUrls = const <String, String>{},
   });
 
-  /// 从资产名解析出的版本号（如 0.1.0）。
+  /// 从资产名解析出的版本号（如 0.1.0，纯数字点分段）。
   final String version;
 
   /// Release 名称（如 "JMComic-Flutter 最新构建"）。
@@ -34,8 +38,12 @@ class ReleaseInfo {
   /// Release 说明（更新内容，Markdown 文本）。
   final String body;
 
-  /// 更新 APK 下载地址（优先 arm64-v8a，其次 universal）。
+  /// 默认 APK 下载地址（优先 arm64-v8a，其次 universal）。
   final String apkUrl;
+
+  /// 按架构索引的 APK 地址：键为 universal / arm64-v8a /
+  /// armeabi-v7a / x86_64（资产名中含对应标识时收录）。
+  final Map<String, String> abiUrls;
 
   /// Release 页面地址。
   final String htmlUrl;
@@ -80,7 +88,7 @@ class GithubService {
     return null;
   }
 
-  /// 拉取仓库元信息（Star 数 + 简介）；失败返回 null（静默降级）。
+  /// 拉取仓库元信息（Star 数 + 简介 + 开源协议）；失败返回 null（静默降级）。
   ///
   /// 使用 REST API：`GET /repos/{owner}/{repo}`，匿名 60 次/小时/IP
   /// 足够"每次冷启动请求一次"的频率。
@@ -92,6 +100,8 @@ class GithubService {
           ? data['stargazers_count'] as int
           : int.tryParse('${data['stargazers_count']}'),
       description: (data['description'] ?? '') as String,
+      license: (data['license'] as Map<String, dynamic>?)?['spdx_id']
+          as String?,
     );
   }
 
@@ -102,50 +112,66 @@ class GithubService {
     final assets = (data['assets'] as List? ?? <dynamic>[])
         .whereType<Map<String, dynamic>>()
         .toList();
-    // 优先 arm64-v8a（绝大多数现代手机），其次 universal。
-    Map<String, dynamic> apk = <String, dynamic>{};
+    // 按架构索引 APK 资产（资产名形如
+    // JMComic-Flutter-v0.1.0-arm64-v8a.apk）。
+    const arches = <String>['universal', 'arm64-v8a', 'armeabi-v7a', 'x86_64'];
+    final abiUrls = <String, String>{};
     for (final a in assets) {
-      if ((a['name'] as String? ?? '').contains('arm64-v8a')) {
-        apk = a;
-        break;
-      }
-    }
-    if (apk.isEmpty) {
-      for (final a in assets) {
-        if ((a['name'] as String? ?? '').contains('universal')) {
-          apk = a;
-          break;
+      final name = a['name'] as String? ?? '';
+      for (final arch in arches) {
+        if (name.contains(arch) && !abiUrls.containsKey(arch)) {
+          final url = a['browser_download_url'] as String?;
+          if (url != null) abiUrls[arch] = url;
         }
       }
     }
-    if (apk.isEmpty) return null;
-    final apkName = apk['name'] as String? ?? '';
-    final m = RegExp(r'v(\d[\w.\-]*)').firstMatch(apkName);
-    final version = m?.group(1) ?? '';
-    if (version.isEmpty) return null;
+    // 版本号从资产名解析：只取 v 后的纯数字点分段
+    // （0.1.0），避免把 -arm64-v8a 等后缀吞进版本号。
+    var version = '';
+    var apkUrl = '';
+    for (final a in assets) {
+      final name = a['name'] as String? ?? '';
+      final m = RegExp(r'v(\d+(?:\.\d+)*)').firstMatch(name);
+      if (m == null) continue;
+      version = m.group(1)!;
+      apkUrl =
+          abiUrls['arm64-v8a'] ??
+          abiUrls['universal'] ??
+          (a['browser_download_url'] as String? ?? '');
+      break;
+    }
+    if (version.isEmpty || apkUrl.isEmpty) return null;
     return ReleaseInfo(
       version: version,
       title: (data['name'] ?? 'Release') as String,
       body: (data['body'] ?? '') as String,
-      apkUrl: apk['browser_download_url'] as String,
+      apkUrl: apkUrl,
       htmlUrl:
           (data['html_url'] ?? 'https://github.com/$owner/$repo/releases')
               as String,
+      abiUrls: abiUrls,
     );
   }
 
-  /// 版本号比较：a 大于 b 返回 true（按点分段数值比较，非数字段按 0）。
+  /// 版本号比较：a 大于 b 返回 true。按点分段数值比较，短的一方
+  /// 以 0 补齐（0.1 == 0.1.0），避免后缀段被误判为更新。
   static bool isNewerVersion(String a, String b) {
-    List<int> parse(String v) => v
-        .split(RegExp(r'[.+\-]'))
-        .map((e) => int.tryParse(e) ?? 0)
-        .toList();
-    final pa = parse(a);
-    final pb = parse(b);
-    for (var i = 0; i < pa.length && i < pb.length; i++) {
-      if (pa[i] != pb[i]) return pa[i] > pb[i];
+    int seg(String v, int i) {
+      final parts = v.split('.');
+      if (i >= parts.length) return 0;
+      return int.tryParse(parts[i]) ?? 0;
     }
-    return pa.length > pb.length;
+
+    final maxLen =
+        a.split('.').length > b.split('.').length
+            ? a.split('.').length
+            : b.split('.').length;
+    for (var i = 0; i < maxLen; i++) {
+      final x = seg(a, i);
+      final y = seg(b, i);
+      if (x != y) return x > y;
+    }
+    return false;
   }
 
   /// 下载更新 APK（gh-proxy 前缀加速，失败回退直连），实时回调进度

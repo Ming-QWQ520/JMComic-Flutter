@@ -121,6 +121,7 @@ class MainActivity : FlutterFragmentActivity() {
                         val path = call.argument<String>("path") ?: ""
                         result.success(installApk(path))
                     }
+                    "deviceAbi" -> result.success(deviceAbi())
                     "shareText" -> {
                         val text = call.argument<String>("text") ?: ""
                         val title = call.argument<String>("title") ?: "分享"
@@ -573,6 +574,17 @@ class MainActivity : FlutterFragmentActivity() {
             true
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /// 设备主 ABI（Build.SUPPORTED_ABIS 首位），用于检测更新时挑选
+    /// 与手机 SoC 匹配的最优 APK（arm64-v8a / armeabi-v7a / x86_64）。
+    private fun deviceAbi(): String {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+        } else {
+            @Suppress("DEPRECATION")
+            Build.CPU_ABI
         }
     }
 

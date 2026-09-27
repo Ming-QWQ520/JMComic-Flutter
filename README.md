@@ -89,6 +89,10 @@ Android 构建为手动触发（`workflow_dispatch`），编译 universal / arm6
 - [gh-proxy.com](https://gh-proxy.com) — GitHub 资源下载加速
 - [Flutter](https://flutter.dev) — 跨平台 UI 框架
 
+## 开源协议
+
+本项目基于 [MIT License](LICENSE) 开源。注意：协议仅覆盖本项目代码本身，应用所访问的内容服务归原权利方所有。
+
 ## 免责声明
 
 本项目为学习研究用途的客户端实现，不存储任何漫画资源，所有内容均来自公开接口。请于下载后 24 小时内删除，请支持正版。

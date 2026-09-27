@@ -152,6 +152,10 @@ class AppState extends ChangeNotifier {
   String? _repoDescription;
   String? get repoDescription => _repoDescription;
 
+  /// 开源协议 SPDX ID（GitHub API，仓库未声明时为 null）。
+  String? _repoLicense;
+  String? get repoLicense => _repoLicense;
+
   bool _starsLoaded = false;
 
   /// 线路测速结果 host -> 毫秒（-1 失败）。
@@ -267,6 +271,7 @@ class AppState extends ChangeNotifier {
       _repoStars = meta.stars;
       _repoDescription =
           (meta.description ?? '').trim().isEmpty ? null : meta.description;
+      _repoLicense = meta.license;
       notifyListeners();
     } catch (_) {}
   }

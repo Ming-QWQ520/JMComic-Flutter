@@ -120,6 +120,17 @@ class StorageService {
     }
   }
 
+  /// 设备主 ABI（arm64-v8a / armeabi-v7a / x86_64…），用于检测更新
+  /// 时自动挑选与手机 SoC 匹配的最优 APK。非 Android 返回空串。
+  static Future<String> getDeviceAbi() async {
+    if (!isAndroid) return '';
+    try {
+      return await _channel.invokeMethod<String>('deviceAbi') ?? '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// 调出系统分享面板（详情页分享按钮）。
   ///
   /// Android：ACTION_SEND 文本；Windows：复制到剪贴板并提示。
