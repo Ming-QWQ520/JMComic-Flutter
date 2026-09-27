@@ -430,14 +430,15 @@ class MainActivity : FlutterFragmentActivity() {
         if (found.isEmpty()) {
             return openSafFallback(path)
         }
-        showOpenWithDialog(found.values.toList())
+        showOpenWithDialog(path, found.values.toList())
         return true
     }
 
     /// 应用内「打开方式」列表：图标 + 应用名逐行排列，点击后以显式
     /// 意图直接启动对应管理器；末尾附一条 SAF 目录选择器兜底（所选
-    /// 管理器打不开目录时可用）。
+    /// 管理器打不开目录时可用，[path] 用于初始定位）。
     private fun showOpenWithDialog(
+        path: String,
         entries: List<Triple<String, android.graphics.drawable.Drawable, Intent>>,
     ) {
         val density = resources.displayMetrics.density
