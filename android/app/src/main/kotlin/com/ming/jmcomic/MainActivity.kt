@@ -117,6 +117,10 @@ class MainActivity : FlutterFragmentActivity() {
                         val url = call.argument<String>("url") ?: ""
                         result.success(openUrl(url))
                     }
+                    "installApk" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        result.success(installApk(path))
+                    }
                     "shareText" -> {
                         val text = call.argument<String>("text") ?: ""
                         val title = call.argument<String>("title") ?: "分享"
@@ -376,13 +380,15 @@ class MainActivity : FlutterFragmentActivity() {
         }
 
         // 枚举：同一应用只保留第一个命中的形状（SAF 优先，体验最好）。
-        val found = LinkedHashMap<String, Pair<ResolveInfo, Intent>>()
+        val pm = packageManager
+        // (应用名, 图标, 启动意图)
+        val found = LinkedHashMap<String, Triple<String, android.graphics.drawable.Drawable, Intent>>()
         for ((uri, mime) in probes) {
             val probe = Intent(Intent.ACTION_VIEW)
                 .setDataAndType(uri, mime)
                 .addFlags(grantFlags)
             val infos = try {
-                packageManager.queryIntentActivities(probe, 0)
+                pm.queryIntentActivities(probe, 0)
             } catch (_: Exception) {
                 emptyList<ResolveInfo>()
             }
@@ -390,8 +396,9 @@ class MainActivity : FlutterFragmentActivity() {
                 val info = ri.activityInfo ?: continue
                 val key = "${info.packageName}/${info.name}"
                 if (found.containsKey(key)) continue
-                found[key] = Pair(
-                    ri,
+                found[key] = Triple(
+                    ri.loadLabel(pm).toString(),
+                    ri.loadIcon(pm),
                     Intent(Intent.ACTION_VIEW)
                         .setComponent(
                             ComponentName(info.packageName, info.name)
@@ -402,12 +409,28 @@ class MainActivity : FlutterFragmentActivity() {
             }
         }
 
+        // MT 管理器未注册任何"打开文件夹"的 intent-filter（调研确认，
+        // 这也是它从不出现在系统选择器/任何枚举中的根因），这里为其
+        // 固定添加入口：用启动意图打开 MT 主界面，由用户自行导航到
+        // 下载目录。已安装才显示。
+        try {
+            val mtLaunch = pm.getLaunchIntentForPackage("bin.mt.plus")
+            if (mtLaunch != null && !found.containsKey("bin.mt.plus")) {
+                found["bin.mt.plus#launch"] = Triple(
+                    "MT 管理器（打开后请定位到下载目录）",
+                    pm.getApplicationIcon("bin.mt.plus"),
+                    mtLaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        } catch (_: Exception) {
+        }
+
         // 一个管理器都枚举不到（可见性/形状异常）时不出空列表，
         // 直接走 SAF 目录选择器 / 系统"下载"管理器兜底。
         if (found.isEmpty()) {
             return openSafFallback(path)
         }
-        showOpenWithDialog(path, found.values.toList())
+        showOpenWithDialog(found.values.toList())
         return true
     }
 
@@ -415,10 +438,8 @@ class MainActivity : FlutterFragmentActivity() {
     /// 意图直接启动对应管理器；末尾附一条 SAF 目录选择器兜底（所选
     /// 管理器打不开目录时可用）。
     private fun showOpenWithDialog(
-        path: String,
-        entries: List<Pair<ResolveInfo, Intent>>,
+        entries: List<Triple<String, android.graphics.drawable.Drawable, Intent>>,
     ) {
-        val pm = packageManager
         val density = resources.displayMetrics.density
         val pad = (16 * density).toInt()
         val iconSize = (36 * density).toInt()
@@ -435,7 +456,7 @@ class MainActivity : FlutterFragmentActivity() {
             orientation = LinearLayout.VERTICAL
         }
 
-        for ((info, launch) in entries) {
+        for ((labelText, iconDrawable, launch) in entries) {
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -445,11 +466,11 @@ class MainActivity : FlutterFragmentActivity() {
                 setBackgroundResource(selector.resourceId)
             }
             val icon = ImageView(this).apply {
-                setImageDrawable(info.loadIcon(pm))
+                setImageDrawable(iconDrawable)
                 layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
             }
             val label = TextView(this).apply {
-                text = info.loadLabel(pm).toString()
+                text = labelText
                 textSize = 16f
                 layoutParams = LinearLayout.LayoutParams(
                     0,
@@ -547,6 +568,29 @@ class MainActivity : FlutterFragmentActivity() {
         return try {
             val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /// 拉起系统安装器安装已下载的更新 APK（经 FileProvider 暴露
+    /// 应用专属外部目录下的文件；未授予"安装未知应用"时系统会
+    /// 自行引导授权页）。
+    private fun installApk(path: String): Boolean {
+        return try {
+            val file = File(path)
+            if (!file.exists()) return false
+            val uri = androidx.core.content.FileProvider.getUriForFile(
+                this, "$packageName.fileprovider", file
+            )
+            val intent = Intent(Intent.ACTION_VIEW)
+                .setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_ACTIVITY_NEW_TASK
+                )
             startActivity(intent)
             true
         } catch (_: Exception) {

@@ -549,9 +549,9 @@ class _ReaderPageState extends State<ReaderPage> {
                     ),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('显示线路切换按键'),
-                      subtitle: const Text('常驻于阅读界面左下角，可在图片'
-                          '加载异常时快速切换图片线路'),
+                      title: const Text('常驻显示线路切换按键'),
+                      subtitle: const Text('开启：按键常驻左下角，调出上下栏时'
+                          '移到进度栏上方；关闭：仅随上下栏一起显示/渐隐'),
                       value: app.readerLineButton,
                       onChanged: (bool v) => app.setReaderLineButton(v),
                     ),
@@ -682,38 +682,46 @@ class _ReaderPageState extends State<ReaderPage> {
               ),
             ),
           ),
-          // 图片线路切换按键：常驻左下角（上下弹窗渐隐时不消失），
-          // 可在阅读设置中开关。置于弹窗之后保证始终可点。
+          // 图片线路切换按键（常驻模式）：上下弹窗隐藏时仍显示在左下角。
+          // 弹窗可见时该键显示在底栏进度条上方（见 _buildBottomOverlay）；
+          // 跟随模式则完全跟随弹窗显隐。可在阅读设置中切换。
           Positioned(
             left: 10,
             bottom: 12,
             child: Consumer<AppState>(
               builder: (BuildContext c, AppState app, _) {
-                if (!app.readerLineButton) return const SizedBox.shrink();
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(21),
-                    onTap: _showImgLineSheet,
-                    child: Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.35),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.dns_rounded,
-                        color: Colors.white70,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                );
+                if (!app.readerLineButton || _barVisible) {
+                  return const SizedBox.shrink();
+                }
+                return _buildLineButton();
               },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 线路切换按键（常驻/跟随两种模式共用同一外观）。
+  Widget _buildLineButton() {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(21),
+        onTap: _showImgLineSheet,
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.dns_rounded,
+            color: Colors.white70,
+            size: 20,
+          ),
+        ),
       ),
     );
   }
@@ -1152,6 +1160,13 @@ class _ReaderPageState extends State<ReaderPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
+                // —— 线路切换按键：显示在进度栏上方（两种模式均如此，
+                //    跟随模式下随弹窗一起渐隐） ——
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: _buildLineButton(),
+                ),
+                const SizedBox(height: 6),
                 // —— 进度条（固定在屏幕底部、位于底部弹窗上方） ——
                 Row(
                   children: <Widget>[
@@ -1238,10 +1253,8 @@ class _ReaderPageState extends State<ReaderPage> {
                     ),
                   ),
                 // —— 底部弹窗操作行：设置 + 深色/浅色 ——
-                // 左下角常驻线路按键开启时预留其宽度，避免遮挡。
                 Row(
                   children: <Widget>[
-                    if (app.readerLineButton) const SizedBox(width: 46),
                     _OverlayAction(
                       icon: Icons.tune_rounded,
                       label: '设置',

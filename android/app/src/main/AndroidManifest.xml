@@ -16,6 +16,8 @@
         tools:ignore="ScopedStorage"/>
     <!-- 应用锁：生物识别（指纹/面容）+ 锁屏密码回退（local_auth/BiometricPrompt） -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
+    <!-- 应用内检测更新后拉起系统安装器安装新 APK -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <application
         android:label="JMComic-Flutter"
         android:name="${applicationName}"
@@ -48,6 +50,16 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 更新 APK 安装：经 FileProvider 暴露应用专属外部目录 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
     </application>
     <queries>
         <intent>

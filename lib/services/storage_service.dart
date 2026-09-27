@@ -105,6 +105,21 @@ class StorageService {
     }
   }
 
+  /// 拉起系统安装器安装已下载的更新 APK（原生经 FileProvider 暴露）。
+  /// 返回 false 表示启动安装器失败（如未授权安装未知应用）。
+  static Future<bool> installApk(String path) async {
+    if (!isAndroid || path.isEmpty) return false;
+    try {
+      return await _channel
+              .invokeMethod<bool>('installApk', <String, dynamic>{
+            'path': path,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 调出系统分享面板（详情页分享按钮）。
   ///
   /// Android：ACTION_SEND 文本；Windows：复制到剪贴板并提示。

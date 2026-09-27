@@ -47,3 +47,9 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+// 检测更新安装 APK 需要 androidx.core.content.FileProvider
+// （Flutter embedding 会传递引入，这里显式声明保证版本稳定）。
+dependencies {
+    implementation("androidx.core:core-ktx:1.13.1")
+}

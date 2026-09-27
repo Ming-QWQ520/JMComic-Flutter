@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 更新 APK 下载目录：应用专属外部存储 files/update/（无需存储权限） -->
+<paths>
+    <external-files-path
+        name="update_apk"
+        path="update/" />
+</paths>

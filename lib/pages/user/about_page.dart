@@ -1,15 +1,21 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/constants.dart';
+import '../../services/github_service.dart';
 import '../../services/storage_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
 
-/// 关于项目页（「更多 → 关于项目」/ 设置 → 关于）。
+/// 关于项目页。
 ///
-/// 展示：项目名称与介绍（含 APP 图标）、作者信息、相关链接
-/// （B站 / GitHub / 抖音）、仓库 Star 数（GitHub API，进程冷启动时
-/// 请求一次，切后台回前台不重复请求）。
+/// 展示：项目名称与版本、简介（GitHub API description，不再硬编码）、
+/// 作者信息、相关链接（B站 / GitHub / 抖音）、Star 数、检测更新
+/// （最新版本 + 更新内容 + 立即更新，APK 下载走 gh-proxy.com 加速）、
+/// 致谢列表。
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
@@ -27,6 +33,30 @@ class AboutPage extends StatelessWidget {
         'https://github.com/Ming-QWQ520'),
     ('抖音主页', Icons.music_note_rounded, Color(0xFF161823),
         'https://v.douyin.com/5HBLpptAMVI/'),
+  ];
+
+  /// 致谢：项目/服务名 + 说明 + 链接。
+  static const List<(String, String, String)> _thanks = <(String, String, String)>[
+    (
+      'tonquer/JMComic-qt',
+      'API 协议与功能设计参考',
+      'https://github.com/tonquer/JMComic-qt',
+    ),
+    (
+      'jmcomic (Python)',
+      'JM API 协议的开源实现参考',
+      'https://github.com/hect0x7/JMComic-Core',
+    ),
+    (
+      'gh-proxy.com',
+      'GitHub 资源下载加速',
+      'https://gh-proxy.com',
+    ),
+    (
+      'Flutter',
+      '跨平台 UI 框架',
+      'https://flutter.dev',
+    ),
   ];
 
   @override
@@ -104,7 +134,7 @@ class AboutPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'v0.1.0 · API 协议对齐 tonquer/JMComic-qt',
+                            'v$kAppVersion',
                             style: tt.labelSmall?.copyWith(
                               color: cs.onSurfaceVariant,
                             ),
@@ -115,10 +145,10 @@ class AboutPage extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 14),
+                // 简介：来自 GitHub API 的仓库 description（冷启动时随
+                // Star 数一起拉取），不再硬编码。
                 Text(
-                  '基于 JMcomic-API 的跨平台漫画阅读客户端（Android / Windows），'
-                  '支持在线阅读、下载离线、收藏与评论。本项目仅供学习研究，'
-                  '请于下载后 24 小时内删除，请支持正版。',
+                  state.repoDescription ?? '仓库简介加载中…（可下拉重进刷新）',
                   style: tt.bodySmall?.copyWith(height: 1.6),
                 ),
                 const SizedBox(height: 12),
@@ -140,6 +170,9 @@ class AboutPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 14),
+          // ---------- 检测更新 ----------
+          const _UpdateSection(),
+          const SizedBox(height: 14),
           // ---------- Star 数 ----------
           SectionHeader(title: '项目数据'),
           Card(
@@ -147,8 +180,6 @@ class AboutPage extends StatelessWidget {
               leading: Icon(Icons.star_rounded,
                   size: 24, color: const Color(0xFFF5B301)),
               title: const Text('GitHub Stars'),
-              // 去除原副标题"每次进入 APP 时请求一次（切后台返回不刷新）"
-              // 让 Star 卡片更紧凑、视觉重心集中在数值本身。
               trailing: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 300),
                 child: Text(
@@ -189,6 +220,31 @@ class AboutPage extends StatelessWidget {
               ],
             ),
           ),
+          const SizedBox(height: 14),
+          // ---------- 致谢 ----------
+          SectionHeader(title: '致谢'),
+          Card(
+            child: Column(
+              children: <Widget>[
+                for (var i = 0; i < _thanks.length; i++) ...<Widget>[
+                  _LinkTile(
+                    label: _thanks[i].$1,
+                    subtitle: _thanks[i].$2,
+                    icon: Icons.favorite_rounded,
+                    color: cs.primary,
+                    url: _thanks[i].$3,
+                  ),
+                  if (i != _thanks.length - 1)
+                    Divider(
+                      height: 0.6,
+                      indent: 16,
+                      endIndent: 16,
+                      color: cs.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 24),
           Center(
             child: Text(
@@ -202,6 +258,248 @@ class AboutPage extends StatelessWidget {
   }
 }
 
+/// 检测更新区块：检测最新 Release → 有更新时展示版本名与更新内容 →
+/// 立即更新（Android 内下载 APK 并拉起安装器；桌面端跳转 Release 页）。
+class _UpdateSection extends StatefulWidget {
+  const _UpdateSection();
+
+  @override
+  State<_UpdateSection> createState() => _UpdateSectionState();
+}
+
+class _UpdateSectionState extends State<_UpdateSection> {
+  bool _checking = false;
+  bool _checked = false;
+  ReleaseInfo? _latest;
+  bool _downloading = false;
+  double _progress = 0;
+  String _status = '';
+
+  bool get _hasUpdate {
+    final r = _latest;
+    if (r == null || r.version.isEmpty) return false;
+    return GithubService.isNewerVersion(r.version, kAppVersion);
+  }
+
+  Future<void> _check() async {
+    if (_checking) return;
+    setState(() {
+      _checking = true;
+      _status = '';
+    });
+    final r = await GithubService.fetchLatestRelease();
+    if (!mounted) return;
+    setState(() {
+      _checking = false;
+      _checked = true;
+      _latest = r;
+    });
+  }
+
+  Future<void> _download() async {
+    final r = _latest;
+    if (r == null || _downloading) return;
+    // 桌面端：直接打开 Release 页由用户手动下载。
+    if (!Platform.isAndroid) {
+      await StorageService.openUrl(r.htmlUrl);
+      return;
+    }
+    setState(() {
+      _downloading = true;
+      _progress = 0;
+      _status = '准备下载…';
+    });
+    try {
+      final base = await getExternalStorageDirectory();
+      final updateDir = Directory('${base!.path}/update');
+      await updateDir.create(recursive: true);
+      final savePath =
+          '${updateDir.path}/JMComic-Flutter-v${r.version}-arm64-v8a.apk';
+      final file = await GithubService.downloadUpdate(
+        url: r.apkUrl,
+        savePath: savePath,
+        onProgress: (double p) {
+          if (mounted) setState(() => _progress = p);
+        },
+      );
+      if (!mounted) return;
+      if (file == null) {
+        setState(() {
+          _downloading = false;
+          _status = '下载失败，请检查网络后重试';
+        });
+        return;
+      }
+      setState(() => _status = '下载完成，正在拉起安装…');
+      final ok = await StorageService.installApk(file.path);
+      if (!mounted) return;
+      setState(() {
+        _downloading = false;
+        _status = ok
+            ? '已拉起系统安装器，请确认安装'
+            : '无法拉起安装器，请允许"安装未知应用"后重试';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _downloading = false;
+        _status = '下载失败：$e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SectionHeader(title: '检测更新'),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.system_update_alt_rounded,
+                        size: 22, color: cs.primary),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '当前版本 v$kAppVersion',
+                        style: tt.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    _checking
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : FilledButton.tonal(
+                            onPressed: _check,
+                            child: const Text('检测更新'),
+                          ),
+                  ],
+                ),
+                if (_status.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      _status,
+                      style: tt.labelSmall
+                          ?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ),
+                // 检测失败
+                if (_checked && _latest == null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '检测失败：无法连接 GitHub，请稍后重试',
+                      style: tt.labelSmall?.copyWith(color: cs.error),
+                    ),
+                  ),
+                // 已是最新
+                if (_latest != null && !_hasUpdate)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      '已是最新版本（服务端 v${_latest!.version}）',
+                      style: tt.labelSmall?.copyWith(
+                        color: Colors.green,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                // 有更新：最新版本名 + 更新内容 + 立即更新
+                if (_latest != null && _hasUpdate) ...<Widget>[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: cs.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '发现新版本 v${_latest!.version}',
+                          style: tt.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: cs.primary,
+                          ),
+                        ),
+                        if (_latest!.body.trim().isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 180),
+                            child: SingleChildScrollView(
+                              child: Text(
+                                _latest!.body.trim(),
+                                style: tt.bodySmall?.copyWith(
+                                  height: 1.5,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _downloading ? null : _download,
+                      icon: _downloading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        Platform.isAndroid ? '立即更新' : '前往 Release 页下载',
+                      ),
+                    ),
+                  ),
+                  if (_downloading) ...<Widget>[
+                    const SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: _progress > 0 ? _progress : null,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _progress > 0
+                          ? '${(_progress * 100).toStringAsFixed(1)}%'
+                          : '连接中…',
+                      style: tt.labelSmall?.copyWith(
+                        color: cs.onSurfaceVariant,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// 外链条目。
 class _LinkTile extends StatelessWidget {
   const _LinkTile({
@@ -209,9 +507,11 @@ class _LinkTile extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.url,
+    this.subtitle,
   });
 
   final String label;
+  final String? subtitle;
   final IconData icon;
   final Color color;
   final String url;
@@ -232,6 +532,9 @@ class _LinkTile extends StatelessWidget {
         child: Icon(icon, size: 20, color: color),
       ),
       title: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle!, style: const TextStyle(fontSize: 12)),
       trailing: Icon(Icons.open_in_new_rounded,
           size: 18, color: cs.onSurfaceVariant),
       onTap: () async {

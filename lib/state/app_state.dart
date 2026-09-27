@@ -144,9 +144,14 @@ class AppState extends ChangeNotifier {
     await _store.setBool('reader_line_button', v);
   }
 
-  // ---------- 项目 Star 数（GitHub API，进程冷启动请求一次） ----------
+  // ---------- 项目数据（GitHub API，进程冷启动请求一次） ----------
   int? _repoStars;
   int? get repoStars => _repoStars;
+
+  /// 仓库简介（GitHub API description，关于页展示用）。
+  String? _repoDescription;
+  String? get repoDescription => _repoDescription;
+
   bool _starsLoaded = false;
 
   /// 线路测速结果 host -> 毫秒（-1 失败）。
@@ -252,19 +257,17 @@ class AppState extends ChangeNotifier {
     _fetchRepoStars();
   }
 
-  /// 拉取 GitHub 仓库 Star 数（fire-and-forget，失败保留 null）。
+  /// 拉取 GitHub 仓库元信息：Star 数 + 简介（fire-and-forget，失败保留 null）。
   Future<void> _fetchRepoStars() async {
     if (_starsLoaded) return;
     _starsLoaded = true;
     try {
-      final stars = await GithubService.fetchStars(
-        'Ming-QWQ520',
-        'JMComic-Flutter',
-      );
-      if (stars != null) {
-        _repoStars = stars;
-        notifyListeners();
-      }
+      final meta = await GithubService.fetchRepoMeta();
+      if (meta == null) return;
+      _repoStars = meta.stars;
+      _repoDescription =
+          (meta.description ?? '').trim().isEmpty ? null : meta.description;
+      notifyListeners();
     } catch (_) {}
   }
 
