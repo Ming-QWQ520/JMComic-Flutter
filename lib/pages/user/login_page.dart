@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -94,9 +92,11 @@ class _LoginPageState extends State<LoginPage> {
               labelText: '密码',
               prefixIcon: const Icon(Icons.lock_outline_rounded),
               suffixIcon: IconButton(
-                icon: Icon(_obscure
-                    ? Icons.visibility_off_outlined
-                    : Icons.visibility_outlined),
+                icon: Icon(
+                  _obscure
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined,
+                ),
                 onPressed: () => setState(() => _obscure = !_obscure),
               ),
             ),
@@ -111,7 +111,8 @@ class _LoginPageState extends State<LoginPage> {
                 ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text('登录'),
           ),
           const SizedBox(height: 8),
@@ -122,16 +123,18 @@ class _LoginPageState extends State<LoginPage> {
             children: <Widget>[
               TextButton(
                 onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                        builder: (_) => const RegisterPage())),
+                  context,
+                  MaterialPageRoute<void>(builder: (_) => const RegisterPage()),
+                ),
                 child: const Text('没有账号？注册'),
               ),
               TextButton(
                 onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                        builder: (_) => const ForgotPasswordPage())),
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ForgotPasswordPage(),
+                  ),
+                ),
                 child: const Text('忘记密码？'),
               ),
             ],
@@ -140,9 +143,7 @@ class _LoginPageState extends State<LoginPage> {
           Text(
             '仅用于学习研究，请使用自己拥有合法权限的账号。',
             textAlign: TextAlign.center,
-            style: Theme.of(context)
-                .textTheme
-                .labelSmall
+            style: Theme.of(context).textTheme.labelSmall
                 ?.copyWith(color: cs.outline),
           ),
         ],
@@ -183,10 +184,9 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     try {
       final (ok, msg) = await JmApi.instance.resetPassword(e);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok
-              ? '新密码已发送至邮箱，请查收后用新密码登录'
-              : '发送失败: $msg')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(ok ? '新密码已发送至邮箱，请查收后用新密码登录' : '发送失败: $msg')),
+      );
       if (ok) Navigator.pop(context);
     } catch (err) {
       if (!mounted) return;
@@ -240,7 +240,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
                 : const Text('发送新密码'),
           ),
         ],
@@ -249,13 +250,16 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   }
 }
 
-/// 注册 / 找回密码页（对齐 qt RegisterReq / RegisterVerifyMailReq /
-/// ResetPasswordReq，走 Web 域名）。
+/// 注册页（对齐官方 JMComic3 2.1.12 注册流程）。
 ///
-/// 关键修复（注册无法使用）：注册流程必须先请求 /captcha 展示验证码
-/// 图片，用户输入后随表单作为 verification 字段提交（对齐 qt
-/// RegisterNewWidget：LoadVer → verEdit → RegisterReq(ver)）。
-/// 旧实现完全没有验证码环节，服务端直接拒绝注册。
+/// 关键修复（注册无法使用）：官方 2.1.12 走 **APP API 域名 POST /register**
+/// （与登录同协议，无需 Web 验证码）。旧实现走 Web 域名 /signup +
+/// captcha，被 Cloudflare 拦截导致注册必然失败。
+///
+/// 流程对齐官方 MemberModal：
+/// 1. 填写 用户名/邮箱/密码/确认密码/性别 → POST /register；
+/// 2. 注册成功 → 邮箱收到验证码（numcode）→ 提交 POST /confirm 完成验证；
+/// 3. 支持重发验证邮件（POST /confirm {username, password}）。
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -268,21 +272,13 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _pass = TextEditingController();
   final TextEditingController _pass2 = TextEditingController();
   final TextEditingController _email = TextEditingController();
-  final TextEditingController _captcha = TextEditingController();
+  final TextEditingController _numcode = TextEditingController();
   String _gender = 'Male';
   bool _loading = false;
+  bool _agree = true;
 
-  /// 验证码图片字节（null = 尚未加载 / 加载失败）。
-  List<int>? _captchaBytes;
-  bool _captchaLoading = false;
-  String _captchaError = '';
-
-  @override
-  void initState() {
-    super.initState();
-    // 进页面即拉取验证码（对齐 qt Init → LoadVer）。
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCaptcha());
-  }
+  /// 注册成功后进入邮箱验证码确认阶段。
+  bool _confirmStage = false;
 
   @override
   void dispose() {
@@ -290,41 +286,21 @@ class _RegisterPageState extends State<RegisterPage> {
     _pass.dispose();
     _pass2.dispose();
     _email.dispose();
-    _captcha.dispose();
+    _numcode.dispose();
     super.dispose();
   }
 
-  /// 拉取/刷新验证码（点击图片可换一张）。
-  Future<void> _loadCaptcha() async {
-    if (_captchaLoading) return;
-    setState(() {
-      _captchaLoading = true;
-      _captchaError = '';
-    });
-    try {
-      final bytes = await JmApi.instance.getCaptcha();
-      if (!mounted) return;
-      setState(() {
-        _captchaBytes = bytes;
-        _captchaLoading = false;
-        _captcha.clear();
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _captchaBytes = null;
-        _captchaLoading = false;
-        _captchaError = '$e';
-      });
-    }
-  }
+  bool get _inputOk =>
+      _user.text.trim().isNotEmpty &&
+      _pass.text.isNotEmpty &&
+      _email.text.trim().isNotEmpty &&
+      _agree;
 
   Future<void> _submit() async {
     final u = _user.text.trim();
     final p = _pass.text;
     final p2 = _pass2.text;
     final e = _email.text.trim();
-    final ver = _captcha.text.trim();
     if (u.isEmpty || p.isEmpty || e.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('请填写用户名、密码和邮箱')));
@@ -335,62 +311,74 @@ class _RegisterPageState extends State<RegisterPage> {
           .showSnackBar(const SnackBar(content: Text('两次密码不一致')));
       return;
     }
-    if (ver.isEmpty) {
+    if (!_agree) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请输入验证码')));
+          .showSnackBar(const SnackBar(content: Text('请先确认已年满 18 岁并同意条款')));
       return;
     }
     setState(() => _loading = true);
     try {
-      final (ok, msg) = await JmApi.instance
-          .register(u, e, p, p2, sex: _gender, ver: ver);
+      final (ok, msg) = await JmApi.instance.register(
+        u,
+        e,
+        p,
+        p2,
+        sex: _gender,
+      );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok ? '注册成功，请登录' : '注册失败: $msg')));
       if (ok) {
-        Navigator.pop(context);
+        // 对齐官方：注册成功 → 进入邮箱验证码确认阶段
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(msg.isEmpty ? '注册成功，请查收验证邮件' : msg)),
+        );
+        setState(() => _confirmStage = true);
       } else {
-        // 失败后验证码作废，自动换一张（对齐 qt 点击图片刷新验证码）。
-        _loadCaptcha();
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('注册失败: $msg')));
       }
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('注册失败: $err')));
-      _loadCaptcha();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  /// 验证码图片区域内容（加载中 / 失败占位 / 图片本体）。
-  Widget _buildCaptchaChild() {
-    if (_captchaLoading) {
-      return const SizedBox(
-        width: 18,
-        height: 18,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      );
+  /// 提交邮箱验证码完成账号验证（POST /confirm {username, numcode}）。
+  Future<void> _submitNumcode() async {
+    final u = _user.text.trim();
+    final code = _numcode.text.trim();
+    if (u.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请填写用户名')));
+      return;
     }
-    final bytes = _captchaBytes;
-    if (bytes == null || bytes.isEmpty) {
-      return Icon(
-        Icons.refresh_rounded,
-        size: 20,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
-      );
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入邮件中的验证码')));
+      return;
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(10),
-      child: Image.memory(
-        Uint8List.fromList(bytes),
-        fit: BoxFit.contain,
-        gaplessPlayback: true,
-      ),
-    );
+    setState(() => _loading = true);
+    try {
+      final (ok, msg) = await JmApi.instance.registerConfirm(u, numcode: code);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok ? (msg.isEmpty ? '验证成功，请登录' : msg) : '验证失败: $msg'),
+        ),
+      );
+      if (ok) Navigator.pop(context);
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('验证失败: $err')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
-  /// 重新发送验证邮件（对齐 RegisterVerifyMailReq）。
+  /// 重发验证邮件（POST /confirm {username, password}，对齐官方 resend）。
   Future<void> _resendMail() async {
     final u = _user.text.trim();
     final p = _pass.text;
@@ -414,154 +402,140 @@ class _RegisterPageState extends State<RegisterPage> {
     }
   }
 
-  /// 找回密码（对齐 ResetPasswordReq）。
-  Future<void> _forgot() async {
-    final e = _email.text.trim();
-    if (e.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请先填写邮箱')));
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      final (ok, msg) = await JmApi.instance.resetPassword(e);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(ok ? '找回邮件已发送，请查收' : '发送失败: $msg')));
-    } catch (err) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('发送失败: $err')));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('注册账号')),
+      appBar: AppBar(title: Text(_confirmStage ? '邮箱验证' : '注册账号')),
       body: ListView(
         padding: const EdgeInsets.all(24),
         children: <Widget>[
-          TextField(
-            controller: _user,
-            decoration: const InputDecoration(labelText: '用户名'),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _pass,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: '密码'),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _pass2,
-            obscureText: true,
-            decoration: const InputDecoration(labelText: '确认密码'),
-          ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _email,
-            keyboardType: TextInputType.emailAddress,
-            decoration: const InputDecoration(labelText: '邮箱'),
-          ),
-          const SizedBox(height: 16),
-          // 验证码（对齐 qt GetCaptchaReq → verEdit）：点击图片换一张
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _captcha,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: '验证码',
-                    prefixIcon: Icon(Icons.verified_user_outlined),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              // 验证码图片：点击刷新
-              GestureDetector(
-                onTap: _captchaLoading ? null : _loadCaptcha,
-                child: Container(
-                  width: 116,
-                  height: 46,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest
-                        .withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .outlineVariant
-                          .withValues(alpha: 0.5),
-                    ),
-                  ),
-                  child: _buildCaptchaChild(),
-                ),
-              ),
-            ],
-          ),
-          if (_captchaError.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 6),
-            Text(
-              '验证码加载失败：$_captchaError（点击图片重试）',
-              style: Theme.of(context)
-                  .textTheme
-                  .labelSmall
-                  ?.copyWith(color: Theme.of(context).colorScheme.error),
+          if (!_confirmStage) ...<Widget>[
+            // —— 注册表单（对齐官方 signUp 表单，无需验证码）——
+            TextField(
+              controller: _user,
+              decoration: const InputDecoration(labelText: '用户名'),
+              onChanged: (_) => setState(() {}),
             ),
-          ],
-          const SizedBox(height: 14),
-          // 性别选择（对齐 qt RegisterReq sex 参数）
-          Row(
-            children: <Widget>[
-              const Text('性别'),
-              const SizedBox(width: 16),
-              Expanded(
-                child: SegmentedButton<String>(
-                  segments: const <ButtonSegment<String>>[
-                    ButtonSegment<String>(
-                        value: 'Male', label: Text('男'), icon: Icon(Icons.male)),
-                    ButtonSegment<String>(
+            const SizedBox(height: 14),
+            TextField(
+              controller: _email,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(labelText: '邮箱（用于接收验证码）'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _pass,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '密码'),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _pass2,
+              obscureText: true,
+              decoration: const InputDecoration(labelText: '确认密码'),
+            ),
+            const SizedBox(height: 16),
+            // 性别选择（对齐官方 gender 字段）
+            Row(
+              children: <Widget>[
+                const Text('性别'),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: SegmentedButton<String>(
+                    segments: const <ButtonSegment<String>>[
+                      ButtonSegment<String>(
+                        value: 'Male',
+                        label: Text('男'),
+                        icon: Icon(Icons.male),
+                      ),
+                      ButtonSegment<String>(
                         value: 'Female',
                         label: Text('女'),
-                        icon: Icon(Icons.female)),
-                  ],
-                  selected: <String>{_gender},
-                  onSelectionChanged: (Set<String> s) =>
-                      setState(() => _gender = s.first),
+                        icon: Icon(Icons.female),
+                      ),
+                    ],
+                    selected: <String>{_gender},
+                    onSelectionChanged: (Set<String> s) =>
+                        setState(() => _gender = s.first),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          FilledButton(
-            onPressed: _loading ? null : _submit,
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              ],
             ),
-            child: _loading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('注册'),
-          ),
-          const SizedBox(height: 10),
-          TextButton(
-            onPressed: _loading ? null : _resendMail,
-            child: const Text('重新发送验证邮件'),
-          ),
-          TextButton(
-            onPressed: _loading ? null : _forgot,
-            child: const Text('使用上方邮箱找回密码'),
-          ),
+            const SizedBox(height: 12),
+            // 成人确认 + 条款同意（对齐官方 adult / PrivacyPolicy 检查）
+            CheckboxListTile(
+              value: _agree,
+              onChanged: (v) => setState(() => _agree = v ?? false),
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('我已年满 18 岁并同意相关条款'),
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: (_loading || !_inputOk) ? null : _submit,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: _loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('注册'),
+            ),
+          ] else ...<Widget>[
+            // —— 邮箱验证码确认阶段（对齐官方 confirm 表单）——
+            Container(
+              width: 64,
+              height: 64,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.mark_email_read_outlined,
+                size: 32,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              '注册成功！验证邮件已发送至\n${_email.text.trim()}\n请输入邮件中的验证码完成账号验证。',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _numcode,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: '邮箱验证码',
+                prefixIcon: Icon(Icons.password_rounded),
+              ),
+            ),
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: _loading ? null : _submitNumcode,
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: _loading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('完成验证'),
+            ),
+            TextButton(
+              onPressed: _loading ? null : _resendMail,
+              child: const Text('没收到？重新发送验证邮件'),
+            ),
+          ],
         ],
       ),
     );

@@ -36,6 +36,9 @@ class _SearchPageState extends State<SearchPage>
   String _keyword = '';
   String _order = 'mr';
 
+  /// 服务器热门标签（官方 2.1.12 hot_tags 接口，失败时回退静态关键词）。
+  List<String> _serverHotTags = <String>[];
+
   /// 最近一次搜索的结果总数（服务端 total 字段）。
   String _total = '';
 
@@ -90,6 +93,11 @@ class _SearchPageState extends State<SearchPage>
   @override
   bool get wantKeepAlive => true;
 
+  /// 测试钩子：单元测试环境下置为 false 可禁用热门标签自动拉取
+  /// （避免 widget 测试 FakeAsync 环境产生悬挂网络请求与 pending Timer）。
+  @visibleForTesting
+  static bool hotTagsFetchEnabled = true;
+
   @override
   void initState() {
     super.initState();
@@ -97,6 +105,54 @@ class _SearchPageState extends State<SearchPage>
     if (widget.initialQuery.trim().isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _search());
     }
+    // 静默拉取服务器热门标签（对齐官方 2.1.12 FETCH_HOT_TAGS_THUNK）
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadHotTags());
+  }
+
+  /// 拉取热门标签（hot_tags），失败时静默保留静态关键词。
+  Future<void> _loadHotTags() async {
+    if (!hotTagsFetchEnabled) return;
+    try {
+      final data = await JmApi.instance.getHotTags();
+      if (!mounted) return;
+      final tags = _extractTagNames(data);
+      if (tags.isEmpty) return;
+      setState(() => _serverHotTags = tags);
+    } catch (_) {
+      // 静默失败：保留内置热门关键词
+    }
+  }
+
+  /// 从 hot_tags 响应中宽松提取标签名列表。
+  ///
+  /// 兼容形态：[{id,name}] / {list:[{name}]} / {data:[{tag_name}]} /
+  /// ["标签",...] / {list:["标签",...]}。
+  static List<String> _extractTagNames(dynamic data) {
+    List<dynamic> raw = const <dynamic>[];
+    if (data is List) {
+      raw = data;
+    } else if (data is Map) {
+      for (final key in const <String>['list', 'data', 'tags', 'hot_tags']) {
+        final v = data[key];
+        if (v is List) {
+          raw = v;
+          break;
+        }
+      }
+    }
+    final out = <String>[];
+    for (final e in raw) {
+      if (e is String && e.trim().isNotEmpty) {
+        out.add(e.trim());
+      } else if (e is Map) {
+        final name = e['name'] ?? e['tag'] ?? e['tag_name'] ?? e['title'];
+        if (name != null && name.toString().trim().isNotEmpty) {
+          out.add(name.toString().trim());
+        }
+      }
+      if (out.length >= 24) break; // 最多展示 24 个
+    }
+    return out;
   }
 
   @override
@@ -400,11 +456,38 @@ class _SearchPageState extends State<SearchPage>
     );
   }
 
-  /// 落地页（精简版）：热门搜索 + 搜索历史，其余收纳进顶部菜单。
+  /// 落地页（精简版）：热门标签（服务器） + 热门搜索 + 搜索历史，其余收纳进顶部菜单。
   Widget _buildLanding(AppState state, ColorScheme cs, TextTheme tt) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (_serverHotTags.isNotEmpty) ...<Widget>[
+          Row(
+            children: <Widget>[
+              const Expanded(child: SectionHeader(title: '热门标签')),
+              Icon(Icons.local_fire_department_rounded,
+                  size: 16, color: cs.primary),
+            ],
+          ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _serverHotTags
+                .map(
+                  (String h) => ActionChip(
+                    label: Text(h),
+                    labelStyle: const TextStyle(fontSize: 12.5),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () {
+                      _ctrl.text = h;
+                      _search(h);
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 20),
+        ],
         SectionHeader(title: '热门搜索'),
         Wrap(
           spacing: 8,

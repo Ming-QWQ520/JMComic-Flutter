@@ -74,7 +74,8 @@ void main() {
     test('默认域名与 qt Url2List / PicUrlList 一致', () {
       expect(JmDomain.apiUrlList.value.first, 'https://www.cdnhjk.net');
       expect(JmDomain.picUrlList.value.first, 'https://cdn-msp.jmapiproxy1.cc');
-      expect(JmDomain.headerVer.value, '2.1.7');
+      // 对齐官方 APP 2.1.12 协议版本
+      expect(JmDomain.headerVer.value, '2.1.12');
     });
 
     test('getApiUrl / getImgUrl 索引语义（5=CDN，6=代理）', () {
@@ -97,16 +98,20 @@ void main() {
       expect(JmDomain.headerVer.value, '2.1.8');
       // 还原默认值，避免污染其它测试
       JmDomain.ver.setValue(91);
-      JmDomain.headerVer.setValue('2.1.7');
+      JmDomain.headerVer.setValue('2.1.12');
     });
 
     test('updateSettingFromText 支持逗号分隔列表', () {
       const text = 'Ver=93\nUrl2List=https://a.cc,https://b.cc';
       expect(JmDomain.updateSettingFromText(text), isTrue);
-      expect(JmDomain.apiUrlList.value, <String>['https://a.cc', 'https://b.cc']);
+      expect(JmDomain.apiUrlList.value, <String>[
+        'https://a.cc',
+        'https://b.cc',
+      ]);
       // 还原默认
       JmDomain.apiUrlList.setValue(
-          'https://www.cdnhjk.net,https://www.cdngwc.cc,https://www.cdngwc.net,https://www.cdngwc.club');
+        'https://www.cdnhjk.net,https://www.cdngwc.cc,https://www.cdngwc.net,https://www.cdngwc.club',
+      );
       JmDomain.ver.setValue(91);
     });
   });
@@ -132,7 +137,8 @@ void main() {
     test('filenameFromUrl 提取文件名', () {
       expect(
         Scramble.filenameFromUrl(
-            'https://cdn/media/photos/422889/00001.webp?t=1'),
+          'https://cdn/media/photos/422889/00001.webp?t=1',
+        ),
         '00001',
       );
       expect(

@@ -18,46 +18,52 @@ import 'package:jmcomic/widgets/feedback.dart';
 import 'package:provider/provider.dart';
 
 SearchAlbum _fakeAlbum() => SearchAlbum.fromMap(<String, dynamic>{
-      'id': 422889,
-      'name': '测试漫画标题',
-      'author': '测试作者',
-      'image': '',
-      'category': <String, dynamic>{'id': '1', 'title': '同人志'},
-      'category_sub': <String, dynamic>{'id': '2', 'title': '校园'},
-      'update_at': 0,
-    });
+  'id': 422889,
+  'name': '测试漫画标题',
+  'author': '测试作者',
+  'image': '',
+  'category': <String, dynamic>{'id': '1', 'title': '同人志'},
+  'category_sub': <String, dynamic>{'id': '2', 'title': '校园'},
+  'update_at': 0,
+});
 
 void main() {
   group('反馈组件（feedback.dart）', () {
     testWidgets('SectionHeader 渲染标题', (WidgetTester tester) async {
-      await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: SectionHeader(title: '单元测试标题')),
-      ));
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: SectionHeader(title: '单元测试标题')),
+        ),
+      );
       expect(find.text('单元测试标题'), findsOneWidget);
     });
 
     testWidgets('EmptyView 渲染空态文案', (WidgetTester tester) async {
-      await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: EmptyView(message: '暂无内容')),
-      ));
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: EmptyView(message: '暂无内容')),
+        ),
+      );
       expect(find.text('暂无内容'), findsOneWidget);
     });
 
     testWidgets('Pill 渲染胶囊标签', (WidgetTester tester) async {
-      await tester.pumpWidget(const MaterialApp(
-        home: Scaffold(body: Pill(label: '萝莉')),
-      ));
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(body: Pill(label: '萝莉')),
+        ),
+      );
       expect(find.text('萝莉'), findsOneWidget);
     });
   });
 
   group('AlbumCard', () {
     testWidgets('渲染标题与作者信息', (WidgetTester tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: AlbumCard(album: _fakeAlbum()),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: AlbumCard(album: _fakeAlbum())),
         ),
-      ));
+      );
       // 等待一帧，确保卡片布局稳定。
       await tester.pump();
       // 网格卡片：标题与作者必现。
@@ -71,6 +77,10 @@ void main() {
 
   group('SearchPage 落地页', () {
     testWidgets('不触发搜索时仅展示轻量内容', (WidgetTester tester) async {
+      // 禁用热门标签自动拉取：测试 FakeAsync 环境中真实 IO 无法完成，
+      // 会留下悬挂请求与 pending Timer 导致测试不稳定。
+      SearchPage.hotTagsFetchEnabled = false;
+      addTearDown(() => SearchPage.hotTagsFetchEnabled = true);
       await tester.pumpWidget(
         ChangeNotifierProvider<AppState>.value(
           value: AppState(),
@@ -80,7 +90,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));
 
-      // 精简后的落地页：热门搜索 + 搜索历史 + 提示。
+      // 精简后的落地页：热门标签（服务器）+ 热门搜索 + 搜索历史 + 提示。
       expect(find.text('热门搜索'), findsOneWidget);
       expect(find.textContaining('提示：'), findsOneWidget);
       // 输入纯数字时不展示旧版"编号直达卡片"，提交后直接跳详情。

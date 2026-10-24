@@ -1,3 +1,44 @@
+# v0.1.2 - 注册修复与 API 对齐官方 2.1.12
+
+## bug 修复
+- 注册接口无法使用（核心修复）：解包官方 JMComic3 2.1.12 前端源码
+  （Capacitor assets，含 sourcemap 的 React 业务代码），确认官方注册
+  走 **APP API 域名 POST /register**（与登录同 Token/Tokenparam 签名
+  协议，参数仅 username/email/password/password_confirm/gender，
+  **无需 Web 验证码**）。旧实现走 Web 域名 /signup + captcha，被
+  Cloudflare 拦截 Dart TLS 指纹必然失败；现改走 API 域名（复用多级
+  线路容错），并保留 Web 流程作为网络层失败时的回退
+- 注册后邮箱验证：对齐官方 MemberModal 流程，注册成功进入
+  「邮箱验证码」确认阶段（POST /confirm {username, numcode}），
+  支持重发验证邮件（POST /confirm {username, password}）
+- 忘记密码改走 API 域名 POST /forgot（官方 FETCH_FORGOT_THUNK 同款），
+  失败自动回退 Web /lost；协议版本号 headerVer 对齐官方 2.1.12
+
+## 新增 API（还原自官方 2.1.12 apiPaths.ts，全部接入 JmApi 层）
+- 账号：登出 /logout（退出登录时自动调用）、用户资料编辑
+  useredit/{uid}（GET/POST）、点赞 like、J币充能 coin_buy_charge、
+  去广告 ad_free
+- 通知：通知列表 notifications、未读数 notifications/unreadCount、
+  连载追踪 album_sertracking / album_tracking（个人页新增
+  「消息通知」入口页，支持分类筛选与分页）
+- 任务：任务列表 tasks?type=、领取奖励 POST tasks、金币购买 coin
+  （个人页新增「任务奖励」入口页，每日/每周/每月/新手分类）
+- 搜索：热门标签 hot_tags（搜索页顶部新增服务器「热门标签」快捷
+  筛选区，失败静默回退内置关键词）
+- 小说：novels / novel / novelchapters / search_novels / comment(nid) /
+  novel_favorites / novel_favorites_folder / coin_buy_nc
+- 影片与游戏：videos / latest_hanime / video / baitu-create-token /
+  allgames / game
+- 评论增强：comment_vote 投票、comment_delete 删除、
+  check_recommend_book 推荐检查
+- 其他：tags_favorite / tags_favorite_update 标签收藏、
+  daily_list / daily_list/filter 签到奖励、album_download_2 下载打包
+
+## 工程
+- CI：Android 构建新增 push 到 main/master 自动触发；Windows 构建
+  改为 Android 成功后 workflow_run 链式触发（消除 rolling release
+  重建竞争），仍可手动触发
+
 # v0.1.1 - 九项体验修复
 
 ## bug 修复

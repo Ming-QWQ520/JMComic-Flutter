@@ -1,12 +1,20 @@
 name: Windows Build (Windows x64)
 
-# Windows 桌面版构建（自 build.yml 拆分，可独立手动触发）。
+# Windows 桌面版构建（自 build.yml 拆分）。
+#
+# 触发方式：
+# 1. Android 构建（build-android.yml）成功后自动链式触发
+#    （workflow_run 避免两个工作流同时重建 rolling release 的竞争）；
+# 2. 在 Actions 页面手动触发（workflow_dispatch）。
 #
 # 注意：本工作流会把 windows zip 附加到 rolling release（tag=latest）。
-# Android 的 build.yml 末尾会删除并重建 latest release——因此建议在
-# build.yml 本次运行完成之后再触发本工作流，否则刚附加的 zip 会随
-# latest release 重建而丢失（artifact 不受影响）。
+# Android 的 build-android.yml 末尾会删除并重建 latest release——因此
+# 本工作流只在 Android 构建完成之后才运行。
 on:
+  workflow_run:
+    workflows: ["Android Build (Android APK)"]
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -14,6 +22,12 @@ permissions:
 
 jobs:
   build-windows:
+    # workflow_run 触发时仅在上游 Android 构建成功且来源为 main/master 时运行
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.head_branch == 'main' ||
+        github.event.workflow_run.head_branch == 'master'))
     name: Build Windows (x64)
     runs-on: windows-2022
     steps:
@@ -53,7 +67,10 @@ jobs:
       # Release 尚不存在时自动创建；异常失败不阻塞，产物仍可从
       # Actions artifact 下载。
       - name: Attach to release
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v')
+        if: >-
+          github.event_name == 'workflow_dispatch' ||
+          github.event.workflow_run.head_branch == 'main' ||
+          github.event.workflow_run.head_branch == 'master'
         shell: bash
         run: |
           TAG=$(case "$GITHUB_REF" in refs/tags/v*) echo "$GITHUB_REF_NAME" ;; *) echo "latest" ;; esac)

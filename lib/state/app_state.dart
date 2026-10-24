@@ -490,6 +490,11 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> clearUser() async {
+    // 对齐官方 2.1.12：退出前调用 POST /logout 注销服务端会话
+    // （api.logout() 内部静默吞掉网络异常，不阻塞本地退出）。
+    if (isLogged) {
+      await api.logout();
+    }
     _user = null;
     _c.setAuth('', '');
     notifyListeners();

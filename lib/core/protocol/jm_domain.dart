@@ -117,9 +117,9 @@ class JmDomain {
   static final JmDomainItem<String> proxyImgUrl =
       JmDomainItem<String>('https://cdn-msp.jmapiproxy3.cc');
 
-  /// APP 协议版本号（对齐 qt HeaderVer）。
+  /// APP 协议版本号（对齐 qt HeaderVer / 官方 APP 2.1.12）。
   static final JmDomainItem<String> headerVer =
-      JmDomainItem<String>('2.1.7');
+      JmDomainItem<String>('2.1.12');
 
   /// 远程配置地址（newsvr-2025.txt，可更新全部域名）。
   static final JmDomainItem<String> jmServerUrl = JmDomainItem<String>(

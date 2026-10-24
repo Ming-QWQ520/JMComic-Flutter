@@ -13,6 +13,8 @@ import '../sign/sign_page.dart';
 import 'about_page.dart';
 import 'favorites_page.dart';
 import 'login_page.dart';
+import 'notifications_page.dart';
+import 'tasks_page.dart';
 
 /// 我的页面（重构版）。
 ///
@@ -74,6 +76,12 @@ class _ProfilePageState extends State<ProfilePage> {
             _tile(context, Icons.emoji_events_rounded, '每日签到', '签到日历 / J币奖励',
                 const Color(0xFFFFC107),
                 () => _pushLogged(context, const SignPage())),
+            _tile(context, Icons.notifications_rounded, '消息通知', '专辑更新 / 评论提醒',
+                const Color(0xFFEF5350),
+                () => _pushLogged(context, const NotificationsPage())),
+            _tile(context, Icons.military_tech_rounded, '任务奖励', '每日/每周/每月任务领奖',
+                const Color(0xFF26A69A),
+                () => _pushLogged(context, const TasksPage())),
             _tile(context, Icons.my_library_books_rounded, '我的评论', '发布的评论记录',
                 const Color(0xFF9B59B6),
                 () => _pushLogged(context, const MyCommentsPage())),

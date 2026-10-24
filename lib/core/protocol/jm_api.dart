@@ -62,11 +62,96 @@ class JmApi {
     return r.bytes;
   }
 
-  /// 注册（Web 域名，对齐 RegisterReq）。
+  /// 注册（APP API 域名，对齐官方 JMComic3 2.1.12 FETCH_SIGN_UP_THUNK）。
   ///
-  /// [ver] 为验证码图片中的字符（GET /captcha 获取）。
+  /// 官方 2.1.12 前端源码（Capacitor assets/public/static/js main.js.map
+  /// apiPaths.ts）明确：注册走移动 API 域名 `POST /register`，
+  /// 参数仅 {username, email, password, password_confirm, gender}，
+  /// 与 login 同一套 Token/Tokenparam 签名协议，**无需 Web 验证码**。
+  ///
+  /// 关键修复（注册无法使用）：旧实现走 Web 域名 /signup（带 captcha），
+  /// 该域名受 Cloudflare 严格防护，dart:io TLS 指纹会被拦截
+  /// （"Just a moment..." 挑战页），注册必然失败。
+  /// 改走 API 域名后与登录共用多级线路容错，成功率与 login 一致。
+  ///
+  /// API 注册失败时自动回退 Web /signup 流程（[registerViaWeb]）。
   /// 返回 (是否成功, 消息)。
   Future<(bool, String)> register(
+    String userId,
+    String email,
+    String passwd,
+    String passwd2, {
+    String sex = 'Male',
+    String ver = '',
+  }) async {
+    try {
+      final r = await _c.postForm('register', <String, dynamic>{
+        'username': userId,
+        'email': email,
+        'password': passwd,
+        'password_confirm': passwd2,
+        'gender': sex,
+      });
+      // 标准加密信封：code=200 即成功；业务错误（如用户名已存在）
+      // 由 _decryptResponse 抛 JmApiException，在 catch 中转 Web 流程前
+      // 先把服务端消息透出（这类错误换渠道也无法解决）。
+      final msg = r.msg.isNotEmpty ? r.msg : '注册成功，请查收验证邮件';
+      return (true, msg);
+    } on JmApiException {
+      rethrow; // 业务错误直接透出真实原因（如「用户名已存在」）
+    } catch (_) {
+      // 网络/线路层失败 → 回退 Web 注册（Cloudflare 拦截时仍可能失败，
+      // 但多一层尝试总是更稳）
+      return registerViaWeb(userId, email, passwd, passwd2, sex: sex);
+    }
+  }
+
+  /// 注册确认（APP API 域名，对齐官方 2.1.12 FETCH_SIGN_UP_CONFIRM_THUNK）。
+  ///
+  /// 注册成功后官方会发送验证邮件，用户把邮件中的验证码（numcode）
+  /// 提交到此接口完成账号验证。
+  /// [numcode] 与 [password] 二选一：
+  /// - 带 [numcode]：提交邮箱验证码完成验证；
+  /// - 带 [password]：重发验证邮件（官方 resend 分支）。
+  Future<(bool, String)> registerConfirm(
+    String user, {
+    String numcode = '',
+    String password = '',
+  }) async {
+    final r = await _c.postForm('confirm', <String, dynamic>{
+      'username': user,
+      if (numcode.isNotEmpty) 'numcode': numcode,
+      if (password.isNotEmpty) 'password': password,
+    });
+    return (true, r.msg.isNotEmpty ? r.msg : '操作成功');
+  }
+
+  /// 重新发送注册验证邮件（对齐官方 resend：POST /confirm {username,
+  /// password}）。
+  Future<(bool, String)> registerVerifyMail(String user, String password) =>
+      registerConfirm(user, password: password);
+
+  /// 重置密码（对齐官方 2.1.12 FETCH_FORGOT_THUNK：API 域名 POST /forgot
+  /// {email}）。
+  ///
+  /// 服务端会把官方生成的随机新密码发送到邮箱。
+  /// API 线路失败时回退 Web /lost（qt ResetPasswordReq 同款）。
+  Future<(bool, String)> resetPassword(String email) async {
+    try {
+      final r = await _c.postForm('forgot', <String, dynamic>{'email': email});
+      return (true, r.msg.isNotEmpty ? r.msg : '新密码已发送至邮箱');
+    } on JmApiException {
+      rethrow;
+    } catch (_) {
+      return resetPasswordViaWeb(email);
+    }
+  }
+
+  /// Web 端注册回退（对齐 qt RegisterReq：POST /signup + captcha）。
+  ///
+  /// [ver] 为验证码图片中的字符（GET /captcha 获取）。
+  /// 仅在 API 域名注册网络层失败时作为兜底使用。
+  Future<(bool, String)> registerViaWeb(
     String userId,
     String email,
     String passwd,
@@ -88,21 +173,8 @@ class JmApi {
     return _parseWebMsg(r.body, r.status);
   }
 
-  /// 重新发送注册验证邮件（对齐 RegisterVerifyMailReq）。
-  Future<(bool, String)> registerVerifyMail(
-    String user,
-    String password,
-  ) async {
-    final r = await _c.webPost('/confirm', <String, dynamic>{
-      'username': user,
-      'password': password,
-      'submit_confirm': '發送EMAIL',
-    }, referer: '${JmDomain.webUrl.value}/confirm');
-    return _parseWebMsg(r.body, r.status);
-  }
-
-  /// 重置密码（对齐 ResetPasswordReq）。
-  Future<(bool, String)> resetPassword(String email) async {
+  /// Web 端重置密码回退（对齐 qt ResetPasswordReq：POST /lost）。
+  Future<(bool, String)> resetPasswordViaWeb(String email) async {
     final r = await _c.webPost('/lost', <String, dynamic>{
       'email': email,
       'submit_lost': '恢復密碼',
@@ -448,12 +520,338 @@ class JmApi {
       .get('daily', <String, dynamic>{'user_id': userId}, false)
       .then((r) => r.data);
 
-  /// 每日签到。POST daily_chk （对齐 SignDailyReq2）。
-  Future<dynamic> signDaily(String userId, String dailyId) => _c
+  /// 每日签到。POST daily_chk （对齐 SignDailyReq2 / 官方 FETCH_DAILY_CHECK_THUNK，
+  /// 支持可选 date 字段）。
+  Future<dynamic> signDaily(String userId, String dailyId, {String? date}) => _c
       .postForm('daily_chk', <String, dynamic>{
         'user_id': userId,
         'daily_id': dailyId,
+        if (date != null && date.isNotEmpty) 'date': date,
       })
+      .then((r) => r.data);
+
+  // ===================================================================
+  // 官方 2.1.12 新增 API（还原自官方前端 apiPaths.ts / actions）
+  // ===================================================================
+
+  /// 登出（官方 API_MEMBER_LOOUT：POST /logout）。
+  ///
+  /// 服务端注销会话；本地登录态由调用方（AppState）清理。
+  Future<void> logout() async {
+    try {
+      // 携带当前 JWT（默认 auth=true），服务端按登录态注销会话
+      await _c.postForm('logout', <String, dynamic>{});
+    } catch (_) {
+      // 登出接口失败不阻塞本地退出（token 只存客户端，服务端会话
+      // 自然过期即可）。
+    }
+  }
+
+  /// 热门标签（官方 API_COMIC_HOT_TAGS：GET /hot_tags）。
+  ///
+  /// 返回搜索页「热门标签」快捷入口数据，形态由服务端决定
+  /// （通常为 {list: [{id, name, ...}]} 或数组）。
+  Future<dynamic> getHotTags() =>
+      _c.get('hot_tags', <String, dynamic>{}, false).then((r) => r.data);
+
+  // ---------------- 小说（小說模組） ----------------
+
+  /// 小说列表。GET novels （官方 API_NOVEL_LIST，参数 o 排序 / t 分区 /
+  /// nid 上限 id / page 页码）。
+  Future<dynamic> getNovels({
+    String o = '',
+    String t = '',
+    String nid = '',
+    int page = 1,
+  }) => _c
+      .get('novels', <String, dynamic>{
+        'page': page,
+        if (o.isNotEmpty) 'o': o,
+        if (t.isNotEmpty) 't': t,
+        if (nid.isNotEmpty) 'nid': nid,
+      }, false)
+      .then((r) => r.data);
+
+  /// 小说详情。GET novel?id= （官方 API_NOVEL_DETAIL）。
+  Future<dynamic> getNovel(String id) =>
+      _c.get('novel', <String, dynamic>{'id': id}, false).then((r) => r.data);
+
+  /// 小说章节列表。GET novelchapters?ncid= （官方 API_NOVEL_CHAPTERS）。
+  Future<dynamic> getNovelChapters(String ncid) => _c
+      .get('novelchapters', <String, dynamic>{'ncid': ncid}, false)
+      .then((r) => r.data);
+
+  /// 小说搜索。GET search_novels?search_query= （官方 API_NOVEL_SEARCH）。
+  Future<dynamic> searchNovels(String query, {int page = 1}) => _c
+      .get('search_novels', <String, dynamic>{
+        'search_query': query,
+        'page': page,
+      }, false)
+      .then((r) => r.data);
+
+  /// 小说留言。POST comment （官方 API_NOVEL_COMMENT，nid 为小说 id）。
+  Future<dynamic> sendNovelComment(
+    String nid,
+    String comment, {
+    String cid = '',
+  }) => _c
+      .postForm('comment', <String, dynamic>{
+        'comment': comment,
+        'nid': nid,
+        if (cid.isNotEmpty) 'comment_id': cid,
+      })
+      .then((r) => r.data);
+
+  /// 小说收藏列表。GET novel_favorites?page=&folder_id= （官方
+  /// API_NOVEL_FAVORITES）。
+  Future<dynamic> getNovelFavorites({int page = 1, String folderId = '0'}) => _c
+      .get('novel_favorites', <String, dynamic>{
+        'page': page,
+        'folder_id': folderId.isEmpty ? '0' : folderId,
+      }, false)
+      .then((r) => r.data);
+
+  /// 编辑小说收藏夹（官方 API_EDIT_NOVEL_FAVORITES：
+  /// POST novel_favorites_folder，type=add/del/move）。
+  Future<dynamic> editNovelFavoritesFolder({
+    required String type,
+    String folderId = '',
+    String folderName = '',
+    String nid = '',
+  }) => _c
+      .postForm('novel_favorites_folder', <String, dynamic>{
+        'type': type,
+        if (folderId.isNotEmpty) 'folder_id': folderId,
+        if (folderName.isNotEmpty) 'folder_name': folderName,
+        if (nid.isNotEmpty) 'nid': nid,
+      })
+      .then((r) => r.data);
+
+  /// J币购买小说章节（官方 API_NOVEL_COIN_BUY：POST coin_buy_nc）。
+  Future<dynamic> buyNovelWithCoin(String ncid) => _c
+      .postForm('coin_buy_nc', <String, dynamic>{'ncid': ncid})
+      .then((r) => r.data);
+
+  // ---------------- 影片（videos / hanime） ----------------
+
+  /// 影片列表。GET videos （官方 API_VIDEOS_LIST，video_type /
+  /// sub_category 可选）。
+  Future<dynamic> getVideos({
+    int page = 1,
+    String searchQuery = '',
+    String videoType = '',
+    String subCategory = '',
+  }) => _c
+      .get('videos', <String, dynamic>{
+        'page': page,
+        if (searchQuery.isNotEmpty) 'search_query': searchQuery,
+        if (videoType.isNotEmpty) 'video_type': videoType,
+        if (subCategory.isNotEmpty) 'sub_category': subCategory,
+      }, false)
+      .then((r) => r.data);
+
+  /// 最新 ACG 影片。GET latest_hanime （官方 API_LATEST_HANIME）。
+  Future<dynamic> getLatestHanime({int page = 1}) => _c
+      .get('latest_hanime', <String, dynamic>{'page': page}, false)
+      .then((r) => r.data);
+
+  /// 影片详情。GET video?id= （官方 API_VIDEO_INFO）。
+  Future<dynamic> getVideoInfo(String id) =>
+      _c.get('video', <String, dynamic>{'id': id}, false).then((r) => r.data);
+
+  /// 建立影片播放 token（官方 API_BAITU_CREATE_TOKEN）。
+  Future<dynamic> createBaituToken() => _c
+      .postForm('baitu-create-token', <String, dynamic>{})
+      .then((r) => r.data);
+
+  // ---------------- 游戏（games） ----------------
+
+  /// 游戏列表。GET allgames （官方 API_GAMES_LIST）。
+  Future<dynamic> getGames() =>
+      _c.get('allgames', <String, dynamic>{}, false).then((r) => r.data);
+
+  /// 游戏详情。GET game?id= （官方 API_GAME_INFO）。
+  Future<dynamic> getGameInfo(String id) =>
+      _c.get('game', <String, dynamic>{'id': id}, false).then((r) => r.data);
+
+  // ---------------- 成就 / 任务 ----------------
+
+  /// 任务列表。GET tasks?type=&filter= （官方 API_TASKS_LIST，
+  /// type: daily/week/month/newbie...）。
+  Future<dynamic> getTasks(String type, {String filter = ''}) => _c
+      .get('tasks', <String, dynamic>{
+        'type': type,
+        if (filter.isNotEmpty) 'filter': filter,
+      }, false)
+      .then((r) => r.data);
+
+  /// 领取任务奖励 / 排序（官方 FETCH_CHANGE_TASKS：POST tasks
+  /// {type, uid, task_id?, new_sort_ids?}）。
+  Future<dynamic> changeTasks(
+    String type,
+    String uid, {
+    String taskId = '',
+    String newSortIds = '',
+  }) => _c
+      .postForm('tasks', <String, dynamic>{
+        'type': type,
+        'uid': uid,
+        if (taskId.isNotEmpty) 'task_id': taskId,
+        if (newSortIds.isNotEmpty) 'new_sort_ids': newSortIds,
+      })
+      .then((r) => r.data);
+
+  /// 任务金币购买列表（官方 API_TASKS_BUY_LIST：POST coin
+  /// {uid, task_id?}）。
+  Future<dynamic> buyTask(String uid, {String taskId = ''}) => _c
+      .postForm('coin', <String, dynamic>{
+        'uid': uid,
+        if (taskId.isNotEmpty) 'task_id': taskId,
+      })
+      .then((r) => r.data);
+
+  // ---------------- 通知 ----------------
+
+  /// 通知列表。GET notifications?type=&sub_type=&page= （官方
+  /// API_NOTIFICATIONS；type: all/album/comment...）。
+  Future<dynamic> getNotifications({
+    String type = '',
+    String subType = '',
+    int page = 1,
+  }) => _c
+      .get('notifications', <String, dynamic>{
+        'page': page,
+        if (type.isNotEmpty) 'type': type,
+        if (subType.isNotEmpty) 'sub_type': subType,
+      }, false)
+      .then((r) => r.data);
+
+  /// 未读通知数量。GET notifications/unreadCount （官方
+  /// API_NOTIFICATIONS_UNREAD）。
+  Future<dynamic> getNotificationsUnread() => _c
+      .get('notifications/unreadCount', <String, dynamic>{}, false)
+      .then((r) => r.data);
+
+  /// 串联（连载）追蹤設定。POST album_sertracking （官方
+  /// API_NOTIFICATIONS_SERTRACK）。
+  Future<dynamic> serTrackAlbum(String aid, String type) => _c
+      .postForm('album_sertracking', <String, dynamic>{
+        'aid': aid,
+        'type': type,
+      })
+      .then((r) => r.data);
+
+  /// 追蹤列表。GET album_tracking?page= （官方
+  /// API_NOTIFICATIONS_TRACK_LIST）。
+  Future<dynamic> getTrackedAlbums({int page = 1}) => _c
+      .get('album_tracking', <String, dynamic>{'page': page}, false)
+      .then((r) => r.data);
+
+  // ---------------- 標籤收藏 ----------------
+
+  /// 标签收藏列表。GET tags_favorite （官方 API_TAGS_FAVORITE）。
+  Future<dynamic> getTagsFavorite() =>
+      _c.get('tags_favorite', <String, dynamic>{}, false).then((r) => r.data);
+
+  /// 更新标签收藏（官方 API_TAGS_FAVORITE_UPDATE：POST
+  /// tags_favorite_update，data 为 JSON 字符串形态的标签数组）。
+  Future<dynamic> updateTagsFavorite(String data) => _c
+      .postForm('tags_favorite_update', <String, dynamic>{'data': data})
+      .then((r) => r.data);
+
+  // ---------------- 评论增强 ----------------
+
+  /// 评论投票（官方 API_COMMENT_VOTE：POST comment_vote）。
+  Future<dynamic> commentVote({
+    required String commentId,
+    String aid = '',
+    String bid = '',
+    String nid = '',
+    String gid = '',
+    String likeType = 'like',
+  }) => _c
+      .postForm('comment_vote', <String, dynamic>{
+        'comment_id': commentId,
+        'like_or_dislike': likeType,
+        if (aid.isNotEmpty) 'aid': aid,
+        if (bid.isNotEmpty) 'bid': bid,
+        if (nid.isNotEmpty) 'nid': nid,
+        if (gid.isNotEmpty) 'gid': gid,
+      })
+      .then((r) => r.data);
+
+  /// 删除评论（官方 API_COMMENT_DETELE：POST comment_delete）。
+  Future<dynamic> deleteComment(
+    String commentId, {
+    String aid = '',
+    String bid = '',
+    String nid = '',
+    String gid = '',
+  }) => _c
+      .postForm('comment_delete', <String, dynamic>{
+        'comment_id': commentId,
+        if (aid.isNotEmpty) 'aid': aid,
+        if (bid.isNotEmpty) 'bid': bid,
+        if (nid.isNotEmpty) 'nid': nid,
+        if (gid.isNotEmpty) 'gid': gid,
+      })
+      .then((r) => r.data);
+
+  /// 检查推荐书籍（官方 API_CHECK_RECOMMEND_BN：POST
+  /// check_recommend_book {aid}）。
+  Future<dynamic> checkRecommendBook(String aid) => _c
+      .postForm('check_recommend_book', <String, dynamic>{'aid': aid})
+      .then((r) => r.data);
+
+  // ---------------- 簽到獎勵列表 ----------------
+
+  /// 签到奖励配置列表。GET daily_list?user_id= （官方
+  /// API_DAILY_LIST：签到奖励选项）。
+  Future<dynamic> getDailyList(String userId) => _c
+      .get('daily_list', <String, dynamic>{'user_id': userId}, false)
+      .then((r) => r.data);
+
+  /// 签到奖励筛选切换。POST daily_list/filter （官方
+  /// API_DAILY_LIST_FILTER，data 为 JSON 字符串）。
+  Future<dynamic> dailyListFilter(String data) => _c
+      .postForm('daily_list/filter', <String, dynamic>{'data': data})
+      .then((r) => r.data);
+
+  // ---------------- 用戶編輯 ----------------
+
+  /// 获取用户资料（官方 API_USEREDIT：GET useredit/{uid}）。
+  ///
+  /// 比旧版 user_profile 返回更完整的可编辑字段（昵称/签名/生日等）。
+  Future<dynamic> getUserEdit(String uid) =>
+      _c.get('useredit/$uid', <String, dynamic>{}, false).then((r) => r.data);
+
+  /// 编辑用户资料（官方 FETCH_EDIT_INFO_LIST：POST useredit/{uid}，
+  /// formData 为可编辑字段表单）。
+  Future<dynamic> editUser(String uid, Map<String, dynamic> formData) =>
+      _c.postForm('useredit/$uid', formData).then((r) => r.data);
+
+  // ---------------- 其他 ----------------
+
+  /// 点赞（官方 API_LIKE_DATA：POST like {id, like_type?}，
+  /// 可用于漫画/小说/评论等）。
+  Future<dynamic> addLike(String id, {String likeType = ''}) => _c
+      .postForm('like', <String, dynamic>{
+        'id': id,
+        if (likeType.isNotEmpty) 'like_type': likeType,
+      })
+      .then((r) => r.data);
+
+  /// J币充能（官方 FETCH_CHARGE：POST coin_buy_charge）。
+  Future<dynamic> coinBuyCharge(Map<String, dynamic> params) =>
+      _c.postForm('coin_buy_charge', params).then((r) => r.data);
+
+  /// 去广告设置（官方 API_AD_FREE：GET/POST ad_free）。
+  Future<dynamic> getAdFree() =>
+      _c.get('ad_free', <String, dynamic>{}, false).then((r) => r.data);
+
+  /// 漫画下载打包（官方 API_ALBUM_DOWNLOAD：GET album_download_2?id=）。
+  Future<dynamic> getAlbumDownload(String id) => _c
+      .get('album_download_2', <String, dynamic>{'id': id}, false)
       .then((r) => r.data);
 
   // ===================================================================
