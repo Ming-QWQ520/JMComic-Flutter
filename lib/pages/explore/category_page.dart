@@ -6,6 +6,7 @@ import '../../core/protocol/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/album_grid.dart';
 import '../../widgets/feedback.dart';
+import '../../widgets/liquid_glass_sheet.dart';
 
 /// 分类页：分类入口列表。
 class CategoryPage extends StatefulWidget {
@@ -230,34 +231,31 @@ class _CategoryListPageState extends State<CategoryListPage> {
       appBar: AppBar(
         title: Text(widget.category.name),
         actions: <Widget>[
-          PopupMenuButton<String>(
+          // 排序：液态玻璃自定义弹出框（替代系统 PopupMenu）。
+          IconButton(
             tooltip: '排序',
             icon: const Icon(Icons.sort_rounded),
-            onSelected: (String v) {
-              setState(() => _order = v);
+            onPressed: () async {
+              final r = await LiquidGlassPicker.show(
+                context,
+                title: '排序方式',
+                titleIcon: Icons.sort_rounded,
+                sections: <GlassSection<Object>>[
+                  GlassSection<Object>(
+                    id: 'order',
+                    title: '选择排序依据',
+                    selected: _order,
+                    options: <GlassOption<Object>>[
+                      for (final e in _orders.entries)
+                        GlassOption<Object>(e.key, e.value),
+                    ],
+                  ),
+                ],
+              );
+              if (r == null || !mounted) return;
+              setState(() => _order = r.value as String);
               _resetGrid();
             },
-            itemBuilder: (_) => _orders.entries
-                .map(
-                  (MapEntry<String, String> e) => PopupMenuItem<String>(
-                    value: e.key,
-                    child: Row(
-                      children: [
-                        if (_order == e.key)
-                          Icon(
-                            Icons.check_rounded,
-                            size: 18,
-                            color: Theme.of(context).colorScheme.primary,
-                          )
-                        else
-                          const SizedBox(width: 18),
-                        const SizedBox(width: 8),
-                        Text(e.value),
-                      ],
-                    ),
-                  ),
-                )
-                .toList(),
           ),
           const SizedBox(width: 6),
         ],

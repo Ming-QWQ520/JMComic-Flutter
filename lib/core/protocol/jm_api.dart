@@ -41,8 +41,30 @@ class JmApi {
     return data;
   }
 
+  /// 获取注册验证码图片（对齐 qt GetCaptchaReq：GET /captcha，
+  /// Referer 指向 signup 页）。返回验证码 PNG/JPG 字节。
+  ///
+  /// 关键修复（注册无法使用）：旧注册流程缺少验证码环节，直接提交
+  /// signup 表单会因 verification 字段错误被服务端拒绝。现按 qt 流程：
+  /// 先展示验证码图片 → 用户输入 → 提交时作为 verification 上传。
+  Future<List<int>> getCaptcha() async {
+    final r = await _c.webGetBytes(
+      '/captcha',
+      headers: <String, String>{'referer': '${JmDomain.webUrl.value}/signup'},
+    );
+    if (r.status != 200 || r.bytes.isEmpty) {
+      throw JmHttpException(r.status, '验证码获取失败(HTTP ${r.status})');
+    }
+    if (!JmClient.looksLikeImage(r.bytes)) {
+      // Cloudflare 挑战页等非图片响应
+      throw JmHttpException(0, '验证码响应异常（可能被防护拦截）');
+    }
+    return r.bytes;
+  }
+
   /// 注册（Web 域名，对齐 RegisterReq）。
   ///
+  /// [ver] 为验证码图片中的字符（GET /captcha 获取）。
   /// 返回 (是否成功, 消息)。
   Future<(bool, String)> register(
     String userId,
@@ -62,7 +84,7 @@ class JmApi {
       'age': 'on',
       'terms': 'on',
       'submit_signup': '',
-    }, referer: '${JmDomain.webUrl.value}signup');
+    }, referer: '${JmDomain.webUrl.value}/signup');
     return _parseWebMsg(r.body, r.status);
   }
 
@@ -75,7 +97,7 @@ class JmApi {
       'username': user,
       'password': password,
       'submit_confirm': '發送EMAIL',
-    }, referer: '${JmDomain.webUrl.value}confirm');
+    }, referer: '${JmDomain.webUrl.value}/confirm');
     return _parseWebMsg(r.body, r.status);
   }
 
@@ -84,12 +106,21 @@ class JmApi {
     final r = await _c.webPost('/lost', <String, dynamic>{
       'email': email,
       'submit_lost': '恢復密碼',
-    }, referer: '${JmDomain.webUrl.value}lost');
+    }, referer: '${JmDomain.webUrl.value}/lost');
     return _parseWebMsg(r.body, r.status);
   }
 
   /// 解析 Web 响应中的 toastr 消息（对齐 qt ParseMsg）。
+  ///
+  /// 关键修复（注册无法使用）：
+  /// - 3xx：注册域名不可用会重定向（webPost 已关闭自动跟随），
+  ///   对齐 qt 诊断「出现301跳转, 无法注册」；
+  /// - Cloudflare 挑战页（"Just a moment..."）直接透出原因；
+  /// - 200 但无 toastr 时给出更具体的提示而非笼统「操作失败」。
   (bool, String) _parseWebMsg(String body, int status) {
+    if (status >= 300 && status < 400) {
+      return (false, '注册域名出现 $status 跳转，当前线路不可注册，请稍后重试或切换线路');
+    }
     final errRe = RegExp(r"""toastr\['error'\]\("(.*?)"\)""");
     final sucRe = RegExp(r"""toastr\['success'\]\("(.*?)"\)""");
     final suc = sucRe.firstMatch(body);
@@ -100,8 +131,11 @@ class JmApi {
     if (err != null) {
       return (false, err.group(1) ?? '操作失败');
     }
+    if (body.contains('Just a moment')) {
+      return (false, '被 Cloudflare 防护拦截，请稍后重试或更换线路');
+    }
     if (status >= 400) return (false, 'HTTP $status');
-    return (false, '操作失败');
+    return (false, '操作失败（服务端未返回结果）');
   }
 
   // ===================================================================
@@ -335,7 +369,11 @@ class JmApi {
     return null;
   }
 
-  /// 观看历史。GET watch_list （对齐 GetHistoryReq2）。
+  /// 观看历史。GET watch_list?page= （对齐 GetHistoryReq2）。
+  ///
+  /// 响应 data 形态（对齐 qt ParseHistoryReq2）：
+  /// `{"list": [album...], "total": N}`，部分线路直接返回裸数组，
+  /// 这里统一走 [SearchAlbum.listFrom] 的宽松解析兜底全部形态。
   Future<List<SearchAlbum>> getWatchList(int page) async {
     final r = await _c.get('watch_list', <String, dynamic>{
       'page': page,

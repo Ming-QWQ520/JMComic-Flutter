@@ -808,7 +808,8 @@ class _ThemeGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return GridView.count(
-      crossAxisCount: 3,
+      // 主题仅保留 深浅·橙 / 深浅·青 四套：2×2 网格排布。
+      crossAxisCount: 2,
       mainAxisSpacing: 4,
       crossAxisSpacing: 4,
       shrinkWrap: true,

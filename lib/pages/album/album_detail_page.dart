@@ -105,6 +105,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
     }
   }
 
+  /// 收藏入口：底部弹出收藏夹选择窗（需求：点击收藏时从底部弹出窗口
+  /// 让用户选择收藏至哪个收藏夹，顶部是创建收藏夹）。
+  ///
+  /// 流程对齐 JM 官方 App：
+  /// - 拉取收藏夹列表（favorite 接口 folder_list）；
+  /// - 弹层顶部为「创建收藏夹」（新建后立即出现在列表中）；
+  /// - 点选收藏夹：未收藏时先 addFavorite 收藏，再 moveFavoriteFolder
+  ///   移入所选收藏夹；已收藏时仅移动；
+  /// - 已收藏状态下提供「取消收藏」入口（addFavorite 切换关闭）。
   Future<void> _toggleFavorite() async {
     final app = context.read<AppState>();
     if (!app.isLogged) {
@@ -112,18 +121,37 @@ class _AlbumDetailPageState extends State<AlbumDetailPage>
       return;
     }
     final a = _album!;
+    final messenger = ScaffoldMessenger.of(context);
+    // 预取收藏夹列表（失败时仅展示默认收藏夹，不阻塞弹层）。
+    List<FavoriteFolder> folders = <FavoriteFolder>[];
     try {
-      await _api.addFavorite(a.id.toString());
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(a.isFavorite ? '已移出收藏' : '收藏成功')));
-      setState(() => a.isFavorite = !a.isFavorite);
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+      final data = await _api.getFavoriteList(page: 1);
+      folders = data.folders;
+    } catch (_) {}
+    if (!mounted) return;
+
+    final result = await showModalBottomSheet<_FavoriteResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FavoriteSheet(
+        api: _api,
+        albumId: a.id.toString(),
+        folders: folders,
+        isFavorite: a.isFavorite,
+      ),
+    );
+    if (result == null) return;
+    if (result.unfavorited) {
+      setState(() => a.isFavorite = false);
+      messenger.showSnackBar(const SnackBar(content: Text('已移出收藏')));
+      return;
     }
+    setState(() => a.isFavorite = true);
+    messenger.showSnackBar(SnackBar(
+        content: Text(result.folderName.isEmpty
+            ? '收藏成功'
+            : '已收藏到「${result.folderName}」')));
   }
 
   Future<void> _toggleLike() async {
@@ -1417,6 +1445,332 @@ class _ImageStoreCoverState extends State<ImageStoreCover> {
           gaplessPlayback: true,
         );
       },
+    );
+  }
+}
+
+/// 收藏操作结果（弹层回传给详情页）。
+class _FavoriteResult {
+  const _FavoriteResult._({this.unfavorited = false, this.folderName = ''});
+
+  /// 取消收藏。
+  const _FavoriteResult.unfavorite() : this._(unfavorited: true);
+
+  /// 收藏到指定名称的收藏夹（空 = 默认收藏夹）。
+  const _FavoriteResult.favorite(String name)
+      : this._(folderName: name);
+
+  final bool unfavorited;
+  final String folderName;
+}
+
+/// 收藏夹选择底部弹层（JM 官方 App 风格）。
+///
+/// 结构：
+/// - 顶部：标题「收藏到收藏夹」+ 关闭按钮；
+/// - 「创建收藏夹」入口（新建后立即插入列表并选中态提示）；
+/// - 收藏夹列表：默认收藏 + 用户自建收藏夹；
+/// - 已收藏状态下底部提供「取消收藏」。
+class _FavoriteSheet extends StatefulWidget {
+  const _FavoriteSheet({
+    required this.api,
+    required this.albumId,
+    required this.folders,
+    required this.isFavorite,
+  });
+
+  final JmApi api;
+  final String albumId;
+  final List<FavoriteFolder> folders;
+  final bool isFavorite;
+
+  @override
+  State<_FavoriteSheet> createState() => _FavoriteSheetState();
+}
+
+class _FavoriteSheetState extends State<_FavoriteSheet> {
+  late final List<FavoriteFolder> _folders =
+      List<FavoriteFolder>.from(widget.folders);
+  bool _busy = false;
+
+  Future<void> _pop(_FavoriteResult r) async {
+    Navigator.pop(context, r);
+  }
+
+  /// 创建收藏夹（顶部入口）。
+  Future<void> _createFolder() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
+      context: context,
+      builder: (BuildContext c) => AlertDialog(
+        title: const Text('创建收藏夹'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: '收藏夹名称'),
+        ),
+        actions: <Widget>[
+          TextButton(
+              onPressed: () => Navigator.pop(c), child: const Text('取消')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, ctrl.text.trim()),
+              child: const Text('创建')),
+        ],
+      ),
+    );
+    if (name == null || name.isEmpty) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.addFavoriteFolder(name);
+      if (!mounted) return;
+      setState(() {
+        _folders.add(FavoriteFolder.fromMap(<String, dynamic>{
+          'fid': '${DateTime.now().millisecondsSinceEpoch}',
+          'name': name,
+        }));
+        _busy = false;
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('已创建「$name」，点击它完成收藏')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('创建失败: $e')));
+    }
+  }
+
+  /// 收藏到所选收藏夹：未收藏先收藏，再移动；已收藏仅移动。
+  Future<void> _favoriteTo(FavoriteFolder? folder) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      if (!widget.isFavorite) {
+        await widget.api.addFavorite(widget.albumId);
+      }
+      if (folder != null) {
+        await widget.api.moveFavoriteFolder(widget.albumId, folder.fid);
+      }
+      if (!mounted) return;
+      await _pop(_FavoriteResult.favorite(folder?.name ?? ''));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('收藏失败: $e')));
+    }
+  }
+
+  /// 取消收藏（addFavorite 为切换式接口）。
+  Future<void> _unfavorite() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.api.addFavorite(widget.albumId);
+      if (!mounted) return;
+      await _pop(const _FavoriteResult.unfavorite());
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _busy = false);
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border(
+            top: BorderSide(
+                color: cs.primary.withValues(alpha: 0.35), width: 1),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              // —— 拖拽把手 ——
+              Container(
+                margin: const EdgeInsets.only(top: 10),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: cs.outlineVariant,
+                  borderRadius: BorderRadius.circular(100),
+                ),
+              ),
+              // —— 标题行 ——
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 12, 4),
+                child: Row(
+                  children: <Widget>[
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: cs.primary.withValues(alpha: 0.13),
+                        borderRadius: BorderRadius.circular(11),
+                      ),
+                      child: Icon(Icons.bookmark_rounded,
+                          size: 18, color: cs.primary),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('收藏到收藏夹',
+                          style: tt.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800)),
+                    ),
+                    IconButton(
+                      tooltip: '关闭',
+                      icon: Icon(Icons.close_rounded,
+                          size: 20, color: cs.onSurfaceVariant),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              // —— 创建收藏夹（顶部入口） ——
+              InkWell(
+                borderRadius: BorderRadius.circular(0),
+                onTap: _busy ? null : _createFolder,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  child: Row(
+                    children: <Widget>[
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: cs.primary.withValues(alpha: 0.5),
+                          ),
+                          color: cs.primary.withValues(alpha: 0.06),
+                        ),
+                        child: Icon(Icons.create_new_folder_outlined,
+                            size: 19, color: cs.primary),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text('创建收藏夹',
+                            style: tt.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700)),
+                      ),
+                      Icon(Icons.add_rounded, size: 20, color: cs.primary),
+                    ],
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              // —— 收藏夹列表 ——
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.42,
+                  ),
+                  child: ListView(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    children: <Widget>[
+                      _folderTile(
+                        icon: Icons.folder_special_outlined,
+                        name: '默认收藏',
+                        onTap: () => _favoriteTo(null),
+                      ),
+                      for (final FavoriteFolder f in _folders)
+                        _folderTile(
+                          icon: Icons.folder_outlined,
+                          name: f.name,
+                          onTap: () => _favoriteTo(f),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              // —— 取消收藏（已收藏时） ——
+              if (widget.isFavorite) ...<Widget>[
+                const Divider(height: 1),
+                InkWell(
+                  onTap: _busy ? null : _unfavorite,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: <Widget>[
+                        Icon(Icons.bookmark_remove_outlined,
+                            size: 18, color: cs.error),
+                        const SizedBox(width: 6),
+                        Text('取消收藏',
+                            style: tt.bodyMedium
+                                ?.copyWith(color: cs.error, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              if (_busy)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _folderTile({
+    required IconData icon,
+    required String name,
+    required VoidCallback onTap,
+  }) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return InkWell(
+      onTap: _busy ? null : onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.09),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, size: 19, color: cs.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w500)),
+            ),
+            Icon(Icons.chevron_right_rounded,
+                size: 18, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
     );
   }
 }

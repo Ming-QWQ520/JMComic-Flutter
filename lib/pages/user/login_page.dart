@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -249,6 +251,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
 
 /// 注册 / 找回密码页（对齐 qt RegisterReq / RegisterVerifyMailReq /
 /// ResetPasswordReq，走 Web 域名）。
+///
+/// 关键修复（注册无法使用）：注册流程必须先请求 /captcha 展示验证码
+/// 图片，用户输入后随表单作为 verification 字段提交（对齐 qt
+/// RegisterNewWidget：LoadVer → verEdit → RegisterReq(ver)）。
+/// 旧实现完全没有验证码环节，服务端直接拒绝注册。
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
 
@@ -261,8 +268,21 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _pass = TextEditingController();
   final TextEditingController _pass2 = TextEditingController();
   final TextEditingController _email = TextEditingController();
+  final TextEditingController _captcha = TextEditingController();
   String _gender = 'Male';
   bool _loading = false;
+
+  /// 验证码图片字节（null = 尚未加载 / 加载失败）。
+  List<int>? _captchaBytes;
+  bool _captchaLoading = false;
+  String _captchaError = '';
+
+  @override
+  void initState() {
+    super.initState();
+    // 进页面即拉取验证码（对齐 qt Init → LoadVer）。
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCaptcha());
+  }
 
   @override
   void dispose() {
@@ -270,7 +290,33 @@ class _RegisterPageState extends State<RegisterPage> {
     _pass.dispose();
     _pass2.dispose();
     _email.dispose();
+    _captcha.dispose();
     super.dispose();
+  }
+
+  /// 拉取/刷新验证码（点击图片可换一张）。
+  Future<void> _loadCaptcha() async {
+    if (_captchaLoading) return;
+    setState(() {
+      _captchaLoading = true;
+      _captchaError = '';
+    });
+    try {
+      final bytes = await JmApi.instance.getCaptcha();
+      if (!mounted) return;
+      setState(() {
+        _captchaBytes = bytes;
+        _captchaLoading = false;
+        _captcha.clear();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _captchaBytes = null;
+        _captchaLoading = false;
+        _captchaError = '$e';
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -278,6 +324,7 @@ class _RegisterPageState extends State<RegisterPage> {
     final p = _pass.text;
     final p2 = _pass2.text;
     final e = _email.text.trim();
+    final ver = _captcha.text.trim();
     if (u.isEmpty || p.isEmpty || e.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('请填写用户名、密码和邮箱')));
@@ -288,21 +335,59 @@ class _RegisterPageState extends State<RegisterPage> {
           .showSnackBar(const SnackBar(content: Text('两次密码不一致')));
       return;
     }
+    if (ver.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入验证码')));
+      return;
+    }
     setState(() => _loading = true);
     try {
-      final (ok, msg) =
-          await JmApi.instance.register(u, e, p, p2, sex: _gender);
+      final (ok, msg) = await JmApi.instance
+          .register(u, e, p, p2, sex: _gender, ver: ver);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(ok ? '注册成功，请登录' : '注册失败: $msg')));
-      if (ok) Navigator.pop(context);
+      if (ok) {
+        Navigator.pop(context);
+      } else {
+        // 失败后验证码作废，自动换一张（对齐 qt 点击图片刷新验证码）。
+        _loadCaptcha();
+      }
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('注册失败: $err')));
+      _loadCaptcha();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// 验证码图片区域内容（加载中 / 失败占位 / 图片本体）。
+  Widget _buildCaptchaChild() {
+    if (_captchaLoading) {
+      return const SizedBox(
+        width: 18,
+        height: 18,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
+    final bytes = _captchaBytes;
+    if (bytes == null || bytes.isEmpty) {
+      return Icon(
+        Icons.refresh_rounded,
+        size: 20,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: Image.memory(
+        Uint8List.fromList(bytes),
+        fit: BoxFit.contain,
+        gaplessPlayback: true,
+      ),
+    );
   }
 
   /// 重新发送验证邮件（对齐 RegisterVerifyMailReq）。
@@ -381,6 +466,57 @@ class _RegisterPageState extends State<RegisterPage> {
             keyboardType: TextInputType.emailAddress,
             decoration: const InputDecoration(labelText: '邮箱'),
           ),
+          const SizedBox(height: 16),
+          // 验证码（对齐 qt GetCaptchaReq → verEdit）：点击图片换一张
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _captcha,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(
+                    labelText: '验证码',
+                    prefixIcon: Icon(Icons.verified_user_outlined),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              // 验证码图片：点击刷新
+              GestureDetector(
+                onTap: _captchaLoading ? null : _loadCaptcha,
+                child: Container(
+                  width: 116,
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest
+                        .withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .outlineVariant
+                          .withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: _buildCaptchaChild(),
+                ),
+              ),
+            ],
+          ),
+          if (_captchaError.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 6),
+            Text(
+              '验证码加载失败：$_captchaError（点击图片重试）',
+              style: Theme.of(context)
+                  .textTheme
+                  .labelSmall
+                  ?.copyWith(color: Theme.of(context).colorScheme.error),
+            ),
+          ],
           const SizedBox(height: 14),
           // 性别选择（对齐 qt RegisterReq sex 参数）
           Row(

@@ -8,12 +8,14 @@ import 'package:flutter/material.dart';
 const String kAppVersion = '0.1.0';
 
 /// 主题配色方案（对齐 JMComic-qt res/theme/*.qss）。
+///
+/// 需求变更：仅保留 深色·橙 / 浅色·橙 / 深色·青 / 浅色·青 四套，
+/// 粉色系（light_pink / dark_pink）已移除；旧用户持久化的 pink key
+/// 会在 fromKey 中回落到默认浅色·橙。
 enum ThemeScheme {
   lightOrange('light_orange', '浅色·橙'),
-  lightPink('light_pink', '浅色·粉'),
   lightTeal('light_teal', '浅色·青'),
   darkOrange('dark_orange', '深色·橙'),
-  darkPink('dark_pink', '深色·粉'),
   darkTeal('dark_teal', '深色·青');
 
   const ThemeScheme(this.key, this.label);
@@ -51,15 +53,6 @@ class SchemeColors {
     isDark: false,
   );
 
-  /// 浅色·粉 light_pink。
-  static const SchemeColors lightPink = SchemeColors(
-    primary: Color(0xFFFF4081),
-    accent: Color(0xFFFF79B0),
-    bg: Color(0xFFF3F3F3),
-    surface: Colors.white,
-    isDark: false,
-  );
-
   /// 浅色·青 light_teal。
   static const SchemeColors lightTeal = SchemeColors(
     primary: Color(0xFF1DE9B6),
@@ -78,15 +71,6 @@ class SchemeColors {
     isDark: true,
   );
 
-  /// 深色·粉 dark_pink。
-  static const SchemeColors darkPink = SchemeColors(
-    primary: Color(0xFFFF4081),
-    accent: Color(0xFFFF79B0),
-    bg: Color(0xFF31363B),
-    surface: Color(0xFF3B4148),
-    isDark: true,
-  );
-
   /// 深色·青 dark_teal。
   static const SchemeColors darkTeal = SchemeColors(
     primary: Color(0xFF1DE9B6),
@@ -98,10 +82,8 @@ class SchemeColors {
 
   static SchemeColors of(ThemeScheme s) => switch (s) {
         ThemeScheme.lightOrange => lightOrange,
-        ThemeScheme.lightPink => lightPink,
         ThemeScheme.lightTeal => lightTeal,
         ThemeScheme.darkOrange => darkOrange,
-        ThemeScheme.darkPink => darkPink,
         ThemeScheme.darkTeal => darkTeal,
       };
 

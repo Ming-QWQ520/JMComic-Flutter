@@ -442,14 +442,28 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 删除单条搜索历史（搜索页长按条目后点 X）。
+  Future<void> removeSearchHistory(String keyword) async {
+    _searchHistory = await _store.removeSearchHistory(keyword);
+    notifyListeners();
+  }
+
   // ---------- 登录态 ----------
 
   Future<void> setUser(LoginData user) async {
     _user = user;
-    _c.setAuth(user.jwtToken, user.s);
+    // 关键修复（浏览历史无内容的根因）：
+    // login() 已从响应 Set-Cookie 中捕获 AVS 并写入 client，而 login
+    // 响应 data 内并无 s/AVS 字段（对齐 qt ParseLogin2，只有 jwttoken）。
+    // 此处原来直接 setAuth(user.jwtToken, user.s) 会用空串覆盖掉刚
+    // 捕获的 AVS Cookie，导致 watch_list 等需要会话 Cookie 的接口
+    // 返回 401，表现为「浏览历史无内容」。
+    final avs = _c.avs.isNotEmpty ? _c.avs : user.s;
+    final jwt = user.jwtToken.isNotEmpty ? user.jwtToken : _c.jwt;
+    _c.setAuth(jwt, avs);
     notifyListeners();
-    await _store.setString('jwt', user.jwtToken);
-    await _store.setString('avs', user.s);
+    await _store.setString('jwt', jwt);
+    await _store.setString('avs', avs);
     await _store.setJson('user', user.toMap());
   }
 
@@ -461,14 +475,15 @@ class AppState extends ChangeNotifier {
     try {
       final fresh = await api.getUserProfile();
       if (fresh == null || fresh.id.isEmpty) return;
-      // user_profile 不返回 jwt/AVS，保留本地登录态字段。
+      // user_profile 不返回 jwt/AVS；s 字段同样缺失，保留 client 当前
+      // 登录态字段（含 Cookie 捕获的 AVS），避免合并后被空串覆盖。
       final map = fresh.toMap()
         ..['jwttoken'] =
             _user!.jwtToken.isNotEmpty ? _user!.jwtToken : fresh.jwtToken
-        ..['s'] = _user!.s.isNotEmpty ? _user!.s : fresh.s;
+        ..['s'] = _c.avs.isNotEmpty ? _c.avs : _user!.s;
       final merged = LoginData.fromMap(map);
       _user = merged;
-      _c.setAuth(merged.jwtToken, merged.s);
+      _c.setAuth(merged.jwtToken, merged.s.isNotEmpty ? merged.s : _c.avs);
       notifyListeners();
       await _store.setJson('user', merged.toMap());
     } catch (_) {}

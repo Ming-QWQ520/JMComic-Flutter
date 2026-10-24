@@ -969,7 +969,43 @@ class JmClient {
     );
   }
 
+  /// Web 端 GET 原始字节（验证码图片等二进制资源）。
+  ///
+  /// 关键修复（注册无法使用）：注册流程需要先请求 /captcha 拿到验证码
+  /// 图片，旧 webGet 以文本方式读取会破坏二进制，导致验证码永远无法
+  /// 展示。这里返回原始字节 + 状态码 + set-cookie（会话需要随注册
+  /// 请求一并回传时可用）。
+  Future<({int status, List<int> bytes, Map<String, String> cookies})>
+      webGetBytes(
+    String path, {
+    Map<String, String>? headers,
+  }) async {
+    await _ensureReady();
+    final url = path.startsWith('http')
+        ? Uri.parse(path)
+        : Uri.parse('${JmDomain.webUrl.value}$path');
+    final req = await _client.openUrl('GET', url);
+    _webHeaders().forEach((k, v) => req.headers.set(k, v));
+    headers?.forEach((k, v) => req.headers.set(k, v));
+    final resp = await req.close().timeout(const Duration(seconds: 20));
+    final builder = BytesBuilder(copy: false);
+    await for (final chunk in resp) {
+      builder.add(chunk);
+    }
+    return (
+      status: resp.statusCode,
+      bytes: builder.takeBytes(),
+      cookies: _cookiesOf(resp),
+    );
+  }
+
   /// Web 端 POST 表单（注册/找回等，Web 域名，对齐 qt RegisterReq 等）。
+  ///
+  /// 关键修复（注册无法使用）：dart:io HttpClient 默认自动跟随 301/302
+  /// 重定向，注册域名不可用时会静默跳到别的站点、拿到不含 toastr 的
+  /// HTML，_parseWebMsg 只能返回笼统的「操作失败」。这里关闭自动重定向，
+  /// 把 3xx 显式上抛，由上层给出与 qt 一致的「出现301跳转, 无法注册」
+  /// 诊断信息。
   Future<({int status, String body, Map<String, String> cookies})> webPost(
     String path,
     Map<String, dynamic> form, {
@@ -980,6 +1016,8 @@ class JmClient {
         ? Uri.parse(path)
         : Uri.parse('${JmDomain.webUrl.value}$path');
     final req = await _client.openUrl('POST', url);
+    req.followRedirects = false;
+    req.maxRedirects = 0;
     _webHeaders(
       contentType: 'application/x-www-form-urlencoded',
       referer: referer ?? url.toString(),

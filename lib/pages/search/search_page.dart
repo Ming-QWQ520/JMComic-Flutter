@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
@@ -6,6 +9,7 @@ import '../../core/protocol/models.dart';
 import '../../state/app_state.dart';
 import '../../widgets/album_grid.dart';
 import '../../widgets/feedback.dart';
+import '../../widgets/liquid_glass_sheet.dart';
 
 /// 搜索页。
 ///
@@ -37,6 +41,13 @@ class _SearchPageState extends State<SearchPage>
 
   /// 搜索类型（对齐 qt GetSearchReq2 search_type）。
   String _searchType = '';
+
+  /// 长按 2s 后解锁删除模式的历史项下标集合（修复需求：长按历史项
+  /// 2 秒后右侧出现 X，点击 X 即删除；点击其它区域退出删除模式）。
+  final Set<int> _editingHistory = <int>{};
+
+  /// 长按计时器（每项一个，2s 后把该项加入 _editingHistory）。
+  Timer? _longPressTimer;
 
   static const Map<String, String> _searchTypes = <String, String>{
     '': '全部',
@@ -90,6 +101,7 @@ class _SearchPageState extends State<SearchPage>
 
   @override
   void dispose() {
+    _longPressTimer?.cancel();
     _ctrl.dispose();
     _focus.dispose();
     super.dispose();
@@ -166,6 +178,161 @@ class _SearchPageState extends State<SearchPage>
     });
   }
 
+  /// 液态玻璃弹出框：排序 + 搜索类型（替代系统 PopupMenu）。
+  /// 点击任一选项立即应用并关闭；正在搜索时重新发起搜索。
+  Future<void> _showFilterPicker() async {
+    final r = await LiquidGlassPicker.show(
+      context,
+      title: '排序与类型',
+      titleIcon: Icons.tune_rounded,
+      sections: <GlassSection<Object>>[
+        GlassSection<Object>(
+          id: 'order',
+          title: '排序方式',
+          selected: _order,
+          options: <GlassOption<Object>>[
+            for (final e in _orders.entries)
+              GlassOption<Object>(e.key, e.value,
+                  icon: e.key == 'mr'
+                      ? Icons.schedule_rounded
+                      : e.key == 'mv'
+                          ? Icons.visibility_outlined
+                          : e.key == 'mp'
+                              ? Icons.image_outlined
+                              : Icons.favorite_rounded),
+          ],
+        ),
+        GlassSection<Object>(
+          id: 'type',
+          title: '搜索类型',
+          selected: _searchType,
+          options: <GlassOption<Object>>[
+            for (final e in _searchTypes.entries)
+              GlassOption<Object>(e.key, e.value,
+                  icon: e.key.isEmpty ? Icons.apps_rounded : Icons.label_outline_rounded),
+          ],
+        ),
+      ],
+    );
+    if (r == null || !mounted) return;
+    if (r.sectionId == 'order') {
+      setState(() => _order = r.value as String);
+    } else if (r.sectionId == 'type') {
+      setState(() => _searchType = r.value as String);
+    } else {
+      return;
+    }
+    if (_keyword.isNotEmpty) _search(_keyword);
+  }
+
+  /// 搜索历史条目（长按 2s 后右侧出现 X，点击 X 删除）。
+  ///
+  /// 交互细节：
+  /// - 按下开始计时 2s；提前松手/移出则取消（不打断正常点击搜索）；
+  /// - 计时结束：轻微震动反馈 + 该条目进入编辑态（X 滑入出现）；
+  /// - 点击 X：删除该条历史（其后的条目下标左移，编辑态同步清理）；
+  /// - 点击任意其它位置/条目：退出编辑态（点击条目仍会正常搜索）。
+  Widget _historyChip(int index, String h) {
+    final editing = _editingHistory.contains(index);
+    final cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      // 长按 2s 计时：onLongPressStart 后等待 2s 再激活编辑态，
+      // 而不是系统默认的立即触发（需求明确要求长按 2s）。
+      onLongPressStart: (_) {
+        _longPressTimer?.cancel();
+        _longPressTimer = Timer(const Duration(seconds: 2), () {
+          if (!mounted) return;
+          HapticFeedback.mediumImpact();
+          setState(() => _editingHistory.add(index));
+        });
+      },
+      onLongPressEnd: (_) => _longPressTimer?.cancel(),
+      onLongPressCancel: () => _longPressTimer?.cancel(),
+      onLongPressUp: () => _longPressTimer?.cancel(),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(100),
+          border: Border.all(
+            color: editing
+                ? cs.primary.withValues(alpha: 0.6)
+                : cs.outlineVariant.withValues(alpha: 0.6),
+          ),
+          color: editing ? cs.primary.withValues(alpha: 0.08) : null,
+        ),
+        padding: EdgeInsets.zero,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            InkWell(
+              borderRadius: BorderRadius.circular(100),
+              onTap: editing
+                  ? () => setState(_editingHistory.clear)
+                  : () {
+                      _ctrl.text = h;
+                      _search(h);
+                    },
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    if (editing) ...<Widget>[
+                      Icon(Icons.history_rounded,
+                          size: 14, color: cs.primary),
+                      const SizedBox(width: 5),
+                    ],
+                    Text(
+                      h,
+                      style: const TextStyle(fontSize: 12.5),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // 右侧 X：编辑态下滑入出现，点击即删除。
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              transitionBuilder: (Widget child, Animation<double> a) =>
+                  FadeTransition(
+                opacity: a,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.4, 0),
+                    end: Offset.zero,
+                  ).animate(a),
+                  child: child,
+                ),
+              ),
+              child: editing
+                  ? InkWell(
+                      key: ValueKey<String>('del-$h'),
+                      borderRadius: const BorderRadius.horizontal(
+                          right: Radius.circular(100)),
+                      onTap: () async {
+                        // 删除该条历史（本地存储按值移除）。
+                        final app = context.read<AppState>();
+                        await app.removeSearchHistory(h);
+                        setState(_editingHistory.clear);
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                            2, 9, 10, 9),
+                        child: Icon(Icons.close_rounded,
+                            size: 15,
+                            color: Theme.of(context).colorScheme.error),
+                      ),
+                    )
+                  : const SizedBox(width: 2, key: ValueKey<String>('idle')),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -183,66 +350,15 @@ class _SearchPageState extends State<SearchPage>
           onClear: _clear,
         ),
         actions: [
-          // 排序 + 搜索类型收纳进同一个菜单，精简首屏。
-          PopupMenuButton<String>(
+          // 排序 + 搜索类型收纳进同一个液态玻璃弹出框（自定义样式，
+          // 替代系统 PopupMenu：透明 + 毛玻璃 + 圆角高光）。
+          IconButton(
             tooltip: '排序与类型',
             icon: const Icon(Icons.tune_rounded),
-            onSelected: (String v) {
-              if (v.startsWith('order:')) {
-                setState(() => _order = v.substring(6));
-              } else if (v.startsWith('type:')) {
-                setState(() => _searchType = v.substring(5));
-              } else {
-                return;
-              }
-              if (_keyword.isNotEmpty) _search(_keyword);
-            },
-            itemBuilder: (_) => <PopupMenuEntry<String>>[
-              const PopupMenuItem<String>(
-                enabled: false,
-                child: Text('排序', style: TextStyle(fontSize: 12)),
-              ),
-              for (final e in _orders.entries)
-                PopupMenuItem<String>(
-                  value: 'order:${e.key}',
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 22,
-                        child: _order == e.key
-                            ? Icon(Icons.check_rounded,
-                                size: 17, color: cs.primary)
-                            : null,
-                      ),
-                      Text(e.value),
-                    ],
-                  ),
-                ),
-              const PopupMenuDivider(),
-              const PopupMenuItem<String>(
-                enabled: false,
-                child: Text('搜索类型', style: TextStyle(fontSize: 12)),
-              ),
-              for (final e in _searchTypes.entries)
-                PopupMenuItem<String>(
-                  value: 'type:${e.key}',
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 22,
-                        child: _searchType == e.key
-                            ? Icon(Icons.check_rounded,
-                                size: 17, color: cs.primary)
-                            : null,
-                      ),
-                      Text(e.value),
-                    ],
-                  ),
-                ),
-            ],
+            onPressed: _showFilterPicker,
           ),
           // 用户要求去除右上角独立的「搜索」按钮，仅保留筛选按钮
-          // (PopupMenuButton) 与左侧搜索框。搜索直接通过键盘回车提交，
+          // 与左侧搜索框。搜索直接通过键盘回车提交，
           // 或在搜索框右侧的 clear/submit 入口处理。
           const SizedBox(width: 4),
         ],
@@ -323,22 +439,22 @@ class _SearchPageState extends State<SearchPage>
               ),
             ],
           ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '提示：长按条目 2 秒可删除单条历史',
+              style: tt.labelSmall?.copyWith(
+                color: cs.onSurfaceVariant.withValues(alpha: 0.8),
+              ),
+            ),
+          ),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: state.searchHistory
-                .map(
-                  (String h) => ActionChip(
-                    label: Text(h),
-                    labelStyle: const TextStyle(fontSize: 12.5),
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () {
-                      _ctrl.text = h;
-                      _search(h);
-                    },
-                  ),
-                )
-                .toList(),
+            children: <Widget>[
+              for (int i = 0; i < state.searchHistory.length; i++)
+                _historyChip(i, state.searchHistory[i]),
+            ],
           ),
         ],
         const SizedBox(height: 24),

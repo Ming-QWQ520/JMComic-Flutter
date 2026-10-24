@@ -5,6 +5,7 @@ import '../../core/protocol/models.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/cover_image.dart';
 import '../../widgets/feedback.dart';
+import '../../widgets/liquid_glass_sheet.dart';
 
 /// 收藏页（对齐 qt FavoriteView / FavoriteFoldView）。
 ///
@@ -289,17 +290,33 @@ class _FavoritesPageState extends State<FavoritesPage> {
                 : Icons.grid_view_rounded),
             onPressed: () => setState(() => _grid = !_grid),
           ),
-          PopupMenuButton<String>(
+          // 排序：液态玻璃自定义弹出框（替代系统 PopupMenu）。
+          IconButton(
             tooltip: '排序',
             icon: const Icon(Icons.sort_rounded),
-            onSelected: (String v) {
-              setState(() => _order = v);
+            onPressed: () async {
+              final r = await LiquidGlassPicker.show(
+                context,
+                title: '收藏排序',
+                titleIcon: Icons.sort_rounded,
+                sections: <GlassSection<Object>>[
+                  GlassSection<Object>(
+                    id: 'order',
+                    title: '排序方式',
+                    selected: _order,
+                    options: const <GlassOption<Object>>[
+                      GlassOption<Object>(
+                          'mr', '按收藏时间', icon: Icons.schedule_rounded),
+                      GlassOption<Object>(
+                          'mp', '按更新时间', icon: Icons.update_rounded),
+                    ],
+                  ),
+                ],
+              );
+              if (r == null || !mounted) return;
+              setState(() => _order = r.value as String);
               _load();
             },
-            itemBuilder: (_) => const <PopupMenuItem<String>>[
-              PopupMenuItem<String>(value: 'mr', child: Text('按收藏时间')),
-              PopupMenuItem<String>(value: 'mp', child: Text('按更新时间')),
-            ],
           ),
           IconButton(
             tooltip: '新建收藏夹',

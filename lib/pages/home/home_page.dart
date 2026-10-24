@@ -31,6 +31,12 @@ class _HomePageState extends State<HomePage>
     _grid = AlbumGrid(
       // 异常直接抛给 AlbumGrid，展示真实错误详情
       fetchPage: (int page) => JmApi.instance.getLatest(page),
+      // 关键修复（发现页滚动）：NestedScrollView 内必须让 GridView 绑定
+      // 外层注入的内部 PrimaryScrollController（不传自有 controller），
+      // 内滚到顶后手势平滑交给外层 header 展开；同时关闭内部下拉刷新，
+      // 避免到顶后继续上滑被内层 overscroll 拦截成「直接刷新」。
+      usePrimaryScroll: true,
+      enableRefresh: false,
     );
     _loadBlocks();
   }

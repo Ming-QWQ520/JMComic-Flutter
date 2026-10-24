@@ -114,4 +114,11 @@ class LocalStore {
     await remove(_kSearchHistory);
     return <String>[];
   }
+
+  /// 删除单条搜索历史（按值移除）。
+  Future<List<String>> removeSearchHistory(String keyword) async {
+    final list = await getSearchHistory()..remove(keyword);
+    await setString(_kSearchHistory, json.encode(list));
+    return list;
+  }
 }
