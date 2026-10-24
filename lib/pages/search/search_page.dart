@@ -24,6 +24,11 @@ class SearchPage extends StatefulWidget {
 
   final String initialQuery;
 
+  /// 测试钩子：单元测试环境下置为 false 可禁用热门标签自动拉取
+  /// （避免 widget 测试 FakeAsync 环境产生悬挂网络请求与 pending Timer）。
+  @visibleForTesting
+  static bool hotTagsFetchEnabled = true;
+
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
@@ -93,11 +98,6 @@ class _SearchPageState extends State<SearchPage>
   @override
   bool get wantKeepAlive => true;
 
-  /// 测试钩子：单元测试环境下置为 false 可禁用热门标签自动拉取
-  /// （避免 widget 测试 FakeAsync 环境产生悬挂网络请求与 pending Timer）。
-  @visibleForTesting
-  static bool hotTagsFetchEnabled = true;
-
   @override
   void initState() {
     super.initState();
@@ -111,7 +111,7 @@ class _SearchPageState extends State<SearchPage>
 
   /// 拉取热门标签（hot_tags），失败时静默保留静态关键词。
   Future<void> _loadHotTags() async {
-    if (!hotTagsFetchEnabled) return;
+    if (!SearchPage.hotTagsFetchEnabled) return;
     try {
       final data = await JmApi.instance.getHotTags();
       if (!mounted) return;
