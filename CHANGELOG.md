@@ -1,6 +1,13 @@
-# v0.1.2 - 注册修复与 API 对齐官方 2.1.12
+# v0.1.1 - 注册修复、API 对齐官方 2.1.12 与 APP 内更新修复
 
 ## bug 修复
+- APP 内更新下载必然失败（PathNotFoundException）：保存路径误把
+  Directory 对象直接插值（toString() 为 "Directory: '...'"），生成
+  非法路径导致 openWrite 报错；现改用 updateDir.path 拼接，
+  downloadUpdate 另加保存目录自动创建防御
+- 应用内版本号与发布版本脱节：kAppVersion 硬编码 0.1.0 永远小于
+  Release 版本，导致「已是最新版本」判断失效；现同步为 0.1.1，
+  并新增测试防漂移（校验 kAppVersion 与 pubspec version 一致）
 - 注册接口无法使用（核心修复）：解包官方 JMComic3 2.1.12 前端源码
   （Capacitor assets，含 sourcemap 的 React 业务代码），确认官方注册
   走 **APP API 域名 POST /register**（与登录同 Token/Tokenparam 签名
@@ -39,7 +46,10 @@
   改为 Android 成功后 workflow_run 链式触发（消除 rolling release
   重建竞争），仍可手动触发
 
-# v0.1.1 - 九项体验修复
+# v0.1.0 - 九项体验修复
+
+> 备注：本次发布 APK 实际构建版本号为 0.1.0（pubspec 0.1.0+1），
+> 应用内 kAppVersion 当时亦为 0.1.0。
 
 ## bug 修复
 - 漫画详情收藏：点击收藏改为从底部弹出「收藏到收藏夹」弹层，

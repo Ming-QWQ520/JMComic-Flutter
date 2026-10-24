@@ -381,7 +381,12 @@ class _UpdateSectionState extends State<_UpdateSection> {
       final base = await getExternalStorageDirectory();
       final updateDir = Directory('${base!.path}/update');
       await updateDir.create(recursive: true);
-      final savePath = '$updateDir/JMComic-Flutter-v${r.version}-$arch.apk';
+      // 关键修复（APP 内更新失败）：必须用 updateDir.path 拼接保存路径。
+      // 旧代码 "$updateDir/xxx.apk" 把 Directory 对象直接插值，其
+      // toString() 为 "Directory: '/storage/...'"，生成的非法路径让
+      // openWrite 抛 PathNotFoundException（下载必然失败）。
+      final savePath =
+          '${updateDir.path}/JMComic-Flutter-v${r.version}-$arch.apk';
       final file = await GithubService.downloadUpdate(
         url: url,
         savePath: savePath,

@@ -1,11 +1,29 @@
+import 'dart:io';
+
 import 'package:encrypt/encrypt.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:jmcomic/core/constants.dart';
 import 'package:jmcomic/core/protocol/jm_crypto.dart';
 import 'package:jmcomic/core/protocol/jm_domain.dart';
 import 'package:jmcomic/core/utils/scramble.dart';
 
 void main() {
+  group('版本号同步（防漂移）', () {
+    test('kAppVersion 与 pubspec.yaml version 保持一致', () {
+      // flutter test 的 CWD 是包根目录，可直接读取 pubspec.yaml；
+      // 防止 kAppVersion 硬编码后与发布版本脱节（曾导致应用内
+      // 「已是最新版本」判断永远失效）。
+      final pubspec = File('pubspec.yaml').readAsStringSync();
+      final m = RegExp(
+        r'^version:\s*([\d.]+)\+\d+',
+        multiline: true,
+      ).firstMatch(pubspec);
+      expect(m, isNotNull, reason: 'pubspec.yaml 缺少 version: 字段');
+      expect(kAppVersion, m!.group(1));
+    });
+  });
+
   group('JmCrypto（对齐 tonquer/JMComic-qt）', () {
     test('md5Hex 输出 32 位小写 hex', () {
       final r = JmCrypto.md5Hex('hello');

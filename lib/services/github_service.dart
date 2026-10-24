@@ -207,6 +207,11 @@ class GithubService {
       if (resp == null) return null;
       final total = resp.contentLength ?? 0;
       final file = File(savePath);
+      // 防御：保存目录不存在时（调用方未预创建）先建目录，避免
+      // openWrite 抛 PathNotFoundException 变成未处理异步异常。
+      try {
+        await file.parent.create(recursive: true);
+      } catch (_) {}
       final sink = file.openWrite();
       var received = 0;
       try {
