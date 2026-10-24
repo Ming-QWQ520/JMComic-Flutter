@@ -17,7 +17,7 @@ void main() {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       final m = RegExp(
         r'^version:\s*([\d.]+)\+\d+',
-        multiline: true,
+        multiLine: true,
       ).firstMatch(pubspec);
       expect(m, isNotNull, reason: 'pubspec.yaml 缺少 version: 字段');
       expect(kAppVersion, m!.group(1));
