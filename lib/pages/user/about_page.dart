@@ -1,12 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/constants.dart';
 import '../../services/github_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/update_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/feedback.dart';
 
@@ -282,7 +282,8 @@ class AboutPage extends StatelessWidget {
 }
 
 /// 检测更新区块：检测最新 Release → 有更新时展示版本名与更新内容 →
-/// 立即更新（Android 内下载 APK 并拉起安装器；桌面端跳转 Release 页）。
+/// 两条下载通道可选（直链 / gh-proxy 加速，需求：弹窗与关于页均提供）。
+/// Android 内下载 APK 并拉起安装器；桌面端跳转 Release 页。
 class _UpdateSection extends StatefulWidget {
   const _UpdateSection();
 
@@ -298,53 +299,18 @@ class _UpdateSectionState extends State<_UpdateSection> {
   double _progress = 0;
   String _status = '';
 
-  /// 设备主 ABI（冷启动后异步获取），用于挑选最优更新 APK。
-  String _abi = '';
-
   @override
   void initState() {
     super.initState();
-    StorageService.getDeviceAbi().then((String abi) {
-      if (mounted) setState(() => _abi = abi);
-    });
+    // 预热设备 ABI 查询（UpdateService 下载时也会再查一次，
+    // 这里提前触发让方法通道结果进入引擎缓存）。
+    StorageService.getDeviceAbi();
   }
 
   bool get _hasUpdate {
     final r = _latest;
     if (r == null || r.version.isEmpty) return false;
     return GithubService.isNewerVersion(r.version, kAppVersion);
-  }
-
-  /// 按设备 ABI 挑选最优 APK：
-  /// - arm64-v8a 设备 → arm64 专用包，缺失回退 universal；
-  /// - armeabi-v7a 设备 → 32 位包（arm64 包不兼容），缺失回退 universal；
-  /// - x86_64 设备 → x86_64 包，缺失回退 universal；
-  /// - 其他/未知 → universal。
-  String _pickApk(ReleaseInfo r) {
-    final urls = r.abiUrls;
-    switch (_abi) {
-      case 'arm64-v8a':
-        return urls['arm64-v8a'] ?? urls['universal'] ?? r.apkUrl;
-      case 'armeabi-v7a':
-        return urls['armeabi-v7a'] ?? urls['universal'] ?? r.apkUrl;
-      case 'x86_64':
-        return urls['x86_64'] ?? urls['universal'] ?? r.apkUrl;
-      default:
-        return urls['universal'] ?? r.apkUrl;
-    }
-  }
-
-  String _pickedArch(ReleaseInfo r) {
-    final url = _pickApk(r);
-    for (final arch in const <String>[
-      'universal',
-      'arm64-v8a',
-      'armeabi-v7a',
-      'x86_64',
-    ]) {
-      if (url.contains(arch)) return arch;
-    }
-    return 'apk';
   }
 
   Future<void> _check() async {
@@ -362,7 +328,7 @@ class _UpdateSectionState extends State<_UpdateSection> {
     });
   }
 
-  Future<void> _download() async {
+  Future<void> _download({required bool useProxy}) async {
     final r = _latest;
     if (r == null || _downloading) return;
     // 桌面端：直接打开 Release 页由用户手动下载。
@@ -370,28 +336,20 @@ class _UpdateSectionState extends State<_UpdateSection> {
       await StorageService.openUrl(r.htmlUrl);
       return;
     }
-    final url = _pickApk(r);
-    final arch = _pickedArch(r);
     setState(() {
       _downloading = true;
       _progress = 0;
-      _status = '准备下载（$arch）…';
+      _status = '';
     });
     try {
-      final base = await getExternalStorageDirectory();
-      final updateDir = Directory('${base!.path}/update');
-      await updateDir.create(recursive: true);
-      // 关键修复（APP 内更新失败）：必须用 updateDir.path 拼接保存路径。
-      // 旧代码 "$updateDir/xxx.apk" 把 Directory 对象直接插值，其
-      // toString() 为 "Directory: '/storage/...'"，生成的非法路径让
-      // openWrite 抛 PathNotFoundException（下载必然失败）。
-      final savePath =
-          '${updateDir.path}/JMComic-Flutter-v${r.version}-$arch.apk';
-      final file = await GithubService.downloadUpdate(
-        url: url,
-        savePath: savePath,
+      final file = await UpdateService.downloadApk(
+        release: r,
+        useProxy: useProxy,
         onProgress: (double p) {
           if (mounted) setState(() => _progress = p);
+        },
+        onStatus: (String s) {
+          if (mounted) setState(() => _status = s);
         },
       );
       if (!mounted) return;
@@ -403,7 +361,7 @@ class _UpdateSectionState extends State<_UpdateSection> {
         return;
       }
       setState(() => _status = '下载完成，正在拉起安装…');
-      final ok = await StorageService.installApk(file.path);
+      final ok = await UpdateService.installApk(file);
       if (!mounted) return;
       setState(() {
         _downloading = false;
@@ -527,24 +485,42 @@ class _UpdateSectionState extends State<_UpdateSection> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: _downloading ? null : _download,
-                      icon: _downloading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.download_rounded, size: 18),
-                      label: Text(
-                        Platform.isAndroid ? '立即更新' : '前往 Release 页下载',
+                  // —— 两条下载通道（需求：弹窗与关于页均可选 直链 / gh-proxy）——
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed:
+                              _downloading ? null : () => _download(useProxy: false),
+                          icon: _downloading
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.link_rounded, size: 16),
+                          label: const Text('直链下载'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: FilledButton.tonalIcon(
+                          onPressed:
+                              _downloading ? null : () => _download(useProxy: true),
+                          icon: const Icon(Icons.speed_rounded, size: 16),
+                          label: const Text('加速下载'),
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   if (_downloading) ...<Widget>[
                     const SizedBox(height: 8),

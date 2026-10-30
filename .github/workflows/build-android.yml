@@ -25,6 +25,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 发布签名：签名材料全部存于仓库 Secrets（JM_KEYSTORE_B64 /
+      # JM_STORE_PASSWORD / JM_KEY_ALIAS / JM_KEY_PASSWORD），构建前
+      # 解码生成 android/app/jmcomic-release.keystore + android/key.properties，
+      # 让 release 构建用用户 keystore 签名（修复覆盖安装签名不一致）。
+      # Secrets 未配置时回退 debug 签名（本地开发兼容行为），构建仍会成功。
+      - name: Prepare release signing
+        env:
+          JM_KEYSTORE_B64: ${{ secrets.JM_KEYSTORE_B64 }}
+          JM_STORE_PASSWORD: ${{ secrets.JM_STORE_PASSWORD }}
+          JM_KEY_ALIAS: ${{ secrets.JM_KEY_ALIAS }}
+          JM_KEY_PASSWORD: ${{ secrets.JM_KEY_PASSWORD }}
+        run: |
+          if [ -n "$JM_KEYSTORE_B64" ] && [ -n "$JM_STORE_PASSWORD" ] && [ -n "$JM_KEY_PASSWORD" ]; then
+            echo "$JM_KEYSTORE_B64" | base64 -d > android/app/jmcomic-release.keystore
+            cat > android/key.properties <<EOF
+          storeFile=jmcomic-release.keystore
+          storePassword=${JM_STORE_PASSWORD}
+          keyAlias=${JM_KEY_ALIAS}
+          keyPassword=${JM_KEY_PASSWORD}
+          EOF
+            echo "SIGNING=release" >> "$GITHUB_ENV"
+            echo "签名模式：release keystore"
+          else
+            echo "SIGNING=debug" >> "$GITHUB_ENV"
+            echo "::warning::未配置签名 Secrets（JM_KEYSTORE_B64/JM_STORE_PASSWORD/JM_KEY_PASSWORD），本次 APK 回退 debug 签名，无法覆盖安装同包名的已发布版本"
+          fi
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -60,6 +87,25 @@ jobs:
         run: |
           flutter build apk --release
           flutter build apk --release --split-per-abi
+
+      # 签名校验：release 模式下用 apksigner 确认证书指纹与预期一致
+      # （防 Secrets 内容/别名填错导致发布出错误签名的包）。
+      # 指纹来自本地 keytool -list -v 对 jmcomic-release.keystore 的输出
+      # （SHA256 去冒号小写：27:7F:DC:...:8A:60）。
+      - name: Verify release signature
+        if: env.SIGNING == 'release'
+        run: |
+          APKSIGNER=$(ls -d $ANDROID_HOME/build-tools/*/apksigner | sort | tail -1)
+          EXPECTED="277fdc7ad7eb2d365b10410286bddfd315588598bf6b1f7fe19c19e5e2998a60"
+          ACTUAL=$($APKSIGNER verify --print-certs build/app/outputs/flutter-apk/app-release.apk \
+            | grep -oP 'certificate SHA-256 digest: \K[0-9a-f]+' | head -1)
+          echo "expected: $EXPECTED"
+          echo "actual:   $ACTUAL"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::APK 签名证书与预期 keystore 不一致，请检查 JM_KEYSTORE_B64 / JM_STORE_PASSWORD / JM_KEY_ALIAS Secrets"
+            exit 1
+          fi
+          echo "✓ APK 已用 jmcomic-release.keystore 签名（证书指纹匹配）"
 
       - name: Prepare artifacts
         id: prep

@@ -8,6 +8,8 @@ import 'package:jmcomic/core/protocol/jm_client.dart';
 import 'package:jmcomic/core/protocol/jm_crypto.dart';
 import 'package:jmcomic/core/protocol/jm_domain.dart';
 import 'package:jmcomic/core/utils/scramble.dart';
+import 'package:jmcomic/services/github_service.dart';
+import 'package:jmcomic/services/update_service.dart';
 
 void main() {
   group('版本号同步（防漂移）', () {
@@ -252,6 +254,81 @@ void main() {
       expect(b.heroEnabled, isFalse);
       expect(b.physicsAnimations, isTrue);
       expect(b.card3d, isTrue);
+    });
+  });
+
+  group('版本比较（isNewerVersion）', () {
+    test('逐段数值比较，短段补 0', () {
+      expect(GithubService.isNewerVersion('0.1.3', '0.1.2'), isTrue);
+      expect(GithubService.isNewerVersion('0.2.0', '0.1.9'), isTrue);
+      expect(GithubService.isNewerVersion('1.0', '0.9.9'), isTrue);
+      // 相同版本（含长度差异）不算更新
+      expect(GithubService.isNewerVersion('0.1.3', '0.1.3'), isFalse);
+      expect(GithubService.isNewerVersion('0.1', '0.1.0'), isFalse);
+      // 旧版本不算更新
+      expect(GithubService.isNewerVersion('0.1.1', '0.1.2'), isFalse);
+    });
+  });
+
+  group('更新包挑选（UpdateService.pickApkUrl）', () {
+    ReleaseInfo info() => const ReleaseInfo(
+          version: '0.1.3',
+          title: 't',
+          body: 'b',
+          apkUrl: 'https://github.com/o/r/releases/x.apk',
+          htmlUrl: 'https://github.com/o/r/releases',
+          abiUrls: <String, String>{
+            'universal': 'https://github.com/o/r/releases/universal.apk',
+            'arm64-v8a': 'https://github.com/o/r/releases/arm64.apk',
+            'armeabi-v7a': 'https://github.com/o/r/releases/armv7.apk',
+            'x86_64': 'https://github.com/o/r/releases/x64.apk',
+          },
+        );
+
+    test('arm64 设备选 arm64 包', () {
+      expect(UpdateService.pickApkUrl(info(), 'arm64-v8a'), contains('arm64'));
+    });
+
+    test('32 位设备选 armeabi-v7a 包（arm64 不兼容）', () {
+      expect(
+        UpdateService.pickApkUrl(info(), 'armeabi-v7a'),
+        contains('armv7'),
+      );
+    });
+
+    test('x86_64 设备选 x86_64 包', () {
+      expect(UpdateService.pickApkUrl(info(), 'x86_64'), contains('x64'));
+    });
+
+    test('未知 ABI 回退 universal', () {
+      expect(
+        UpdateService.pickApkUrl(info(), ''),
+        contains('universal'),
+      );
+    });
+
+    test('专用包缺失回退 universal', () {
+      final noArm64 = ReleaseInfo(
+        version: '0.1.3',
+        title: 't',
+        body: 'b',
+        apkUrl: 'https://github.com/o/r/releases/x.apk',
+        htmlUrl: 'https://github.com/o/r/releases',
+        abiUrls: <String, String>{
+          'universal': 'https://github.com/o/r/releases/universal.apk',
+          'armeabi-v7a': 'https://github.com/o/r/releases/armv7.apk',
+        },
+      );
+      expect(
+        UpdateService.pickApkUrl(noArm64, 'arm64-v8a'),
+        contains('universal'),
+      );
+    });
+
+    test('archOf 从下载地址推断架构标签', () {
+      expect(UpdateService.archOf('https://x/arm64-v8a.apk'), 'arm64-v8a');
+      expect(UpdateService.archOf('https://x/universal.apk'), 'universal');
+      expect(UpdateService.archOf('https://x/other.apk'), 'apk');
     });
   });
 }

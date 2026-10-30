@@ -1,3 +1,32 @@
+# v0.1.3 - 发布签名修复、自动检测更新与双通道下载
+
+## 签名修复（覆盖安装）
+- 发布 APK 由 debug 签名改为用户 keystore 签名（jmcomic-release.keystore，
+  别名 ming）：此前 CI 恒用 debug 签名，与已安装包签名不一致导致无法
+  覆盖安装；现 CI 从仓库 Secrets 注入签名材料（JM_KEYSTORE_B64 /
+  JM_STORE_PASSWORD / JM_KEY_ALIAS / JM_KEY_PASSWORD），构建前生成
+  android/key.properties + keystore，release 构建自动应用
+- 本地开发无 key.properties 时自动回退 debug 签名（`flutter run
+  --release` 不受影响）；签名材料不入仓库（android/.gitignore 已含
+  key.properties / *.keystore）
+- CI 新增签名校验步骤：apksigner 比对 APK 证书 SHA-256 指纹与预期
+  keystore 指纹，不一致直接构建失败，杜绝发错签名包
+
+## 自动检测更新（每次进入 APP）
+- 冷启动进入 APP 后自动检测 GitHub 最新 Release（延迟 1.6s 避让首帧
+  与首页请求，失败静默不打扰），发现新版本弹窗提示
+- 更新弹窗：新版本号 + 更新内容滚动展示 + 两条下载通道可选：
+  「直链下载」（GitHub 直链）与「加速下载」（gh-proxy 前缀，失败自动
+  回退直链）；下载中展示进度百分比，完成后自动拉起系统安装器
+- 关于页检测更新同步双通道：原单一「立即更新」按钮改为
+  「直链下载」+「加速下载」两键，逻辑与弹窗共用 UpdateService
+- 下载封装统一入 UpdateService（ABI 最优包挑选逻辑可单测：
+  arm64 设备→arm64 包、32 位设备→armeabi-v7a 包、缺失回退 universal）
+
+## 工程
+- 版本号 0.1.3（pubspec 0.1.3+5，kAppVersion 同步）
+- 新增测试：isNewerVersion 版本比较、pickApkUrl 按 ABI 挑包矩阵
+
 # v0.1.2 - 注册彻底修复、UI 毛玻璃重构、动画设置与主题精简
 
 ## bug 修复

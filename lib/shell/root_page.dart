@@ -5,9 +5,11 @@ import '../pages/explore/category_page.dart';
 import '../pages/home/home_page.dart';
 import '../pages/search/search_page.dart';
 import '../pages/user/profile_page.dart';
+import '../services/update_service.dart';
 import '../services/widget_bridge.dart';
 import '../state/app_state.dart';
 import '../widgets/glass.dart';
+import '../widgets/update_dialog.dart';
 
 /// 根导航壳：首页 / 分类 / 搜索 / 我的。
 class RootPage extends StatefulWidget {
@@ -28,6 +30,29 @@ class _RootPageState extends State<RootPage> {
   // （切换页面），符合常见 App 直觉。
   late final PageController _pageController =
       PageController(initialPage: _index);
+
+  @override
+  void initState() {
+    super.initState();
+    // 需求：每次进入 APP 自动检测是否有新版本，有则弹窗提示。
+    // 延迟 1.6s 执行：避开首帧渲染与首页网络请求的争抢；
+    // RootPage 是应用根路由，initState 每次冷启动恰好执行一次。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 1600), _autoCheckUpdate);
+    });
+  }
+
+  /// 自动检测更新：有新版本时弹出 [UpdateDialog]（失败静默不打扰）。
+  Future<void> _autoCheckUpdate() async {
+    if (!mounted) return;
+    try {
+      final update = await UpdateService.checkForUpdate();
+      if (update == null || !mounted) return;
+      await UpdateDialog.show(context, update);
+    } catch (_) {
+      // 检测失败静默：关于页仍有手动检测入口。
+    }
+  }
 
   @override
   void dispose() {

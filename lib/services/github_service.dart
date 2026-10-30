@@ -174,21 +174,25 @@ class GithubService {
     return false;
   }
 
-  /// 下载更新 APK（gh-proxy 前缀加速，失败回退直连），实时回调进度
-  /// 0.0~1.0。成功返回本地文件，失败（网络中断/内容不完整）返回 null。
+  /// 下载更新 APK，实时回调进度 0.0~1.0。成功返回本地文件，失败
+  /// （网络中断/内容不完整）返回 null。
+  ///
+  /// [preferProxy] = true（默认）：gh-proxy 前缀加速优先，失败自动回退
+  /// GitHub 直链；false：仅走 GitHub 直链（需求：弹窗/关于页可选
+  /// 「直链下载」或「gh-proxy 加速下载」两条通道）。
   static Future<File?> downloadUpdate({
     required String url,
     required String savePath,
     void Function(double progress)? onProgress,
+    bool preferProxy = true,
   }) async {
     final client = http.Client();
     try {
+      final direct = Uri.parse(url);
       final candidates = <Uri>[
-        if (url.startsWith('https://github.com/'))
-          Uri.parse('$_proxy$url')
-        else
-          Uri.parse(url),
-        Uri.parse(url),
+        if (preferProxy && url.startsWith('https://github.com/'))
+          Uri.parse('$_proxy$url'),
+        direct,
       ];
       http.StreamedResponse? resp;
       for (final uri in candidates) {

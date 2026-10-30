@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 /// 当前应用版本（与 pubspec.yaml `version:` 保持一致；GitHub Release
 /// 中的 APK 命名同样使用该版本号，检测更新据此比对。core_test.dart
 /// 有同步性测试防止两者漂移）。
-const String kAppVersion = '0.1.2';
+const String kAppVersion = '0.1.3';
 
 /// 主题配色方案（需求变更：去除橙色系，仅保留深/浅两套青色配色）。
 ///
