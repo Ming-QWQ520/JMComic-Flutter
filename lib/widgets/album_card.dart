@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../core/protocol/models.dart';
-import 'cover_image.dart';
+import '../state/app_state.dart';
+import 'entrance.dart';
+import 'motion.dart';
 
 /// 专辑封面卡片（网格用）：圆角封面 + 分类角标 + 标题 + 作者。
+///
+/// UI 重构新增动效：
+/// - 3D 倾斜（设置 > 动画设置 > 3D 卡片动画，默认关）；
+/// - 按压缩放反馈（物理仿真开启时带弹簧回弹曲线）；
+/// - 封面 Hero 联动（设置 > 动画设置 > Hero 封面联动，默认开）。
 class AlbumCard extends StatelessWidget {
   const AlbumCard({super.key, required this.album, this.onTap});
 
@@ -17,86 +25,89 @@ class AlbumCard extends StatelessWidget {
     final badge = album.categorySub.title.isNotEmpty
         ? album.categorySub.title
         : album.category.title;
+    // 物理仿真动画开启时按压反馈带弹簧回弹，否则标准缓动。
+    final physicsOn = context.select<AppState, bool>(
+      (AppState s) => s.anim.physicsAnimations,
+    );
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      // 关键修复：onTap 为空时默认跳转详情页。此前首页横滑分区
-      // 未传 onTap，InkWell 收到 null 直接吞掉点击，表现为
-      // "首页无法点击观看漫画"。
-      onTap:
-          onTap ??
-          () => Navigator.pushNamed(context, '/album', arguments: album),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(16),
-                    color: cs.surfaceContainerHighest,
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: CoverImage(album: album),
-                  ),
-                ),
-                // 底部渐变遮罩
-                Positioned.fill(
-                  child: DecoratedBox(
+    return Tilt3DCard(
+      child: PressableScale(
+        spring: physicsOn,
+        onTap:
+            onTap ??
+            () => Navigator.pushNamed(context, '/album', arguments: album),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Container(
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.55, 1.0],
-                        colors: [
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.45),
-                        ],
+                      color: cs.surfaceContainerHighest,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: HeroAlbumCover(album: album),
+                    ),
+                  ),
+                  // 底部渐变遮罩
+                  Positioned.fill(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          stops: const [0.55, 1.0],
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withValues(alpha: 0.45),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                if (badge.isNotEmpty)
-                  Positioned(left: 8, top: 8, child: _Badge(label: badge)),
-                if (album.liked || album.isFavorite)
-                  Positioned(
-                    right: 8,
-                    bottom: 8,
-                    child: Icon(
-                      album.liked
-                          ? Icons.favorite_rounded
-                          : Icons.bookmark_rounded,
-                      size: 15,
-                      color: album.liked
-                          ? const Color(0xFFFF6B9D)
-                          : const Color(0xFF7CDBFF),
+                  if (badge.isNotEmpty)
+                    Positioned(left: 8, top: 8, child: _Badge(label: badge)),
+                  if (album.liked || album.isFavorite)
+                    Positioned(
+                      right: 8,
+                      bottom: 8,
+                      child: Icon(
+                        album.liked
+                            ? Icons.favorite_rounded
+                            : Icons.bookmark_rounded,
+                        size: 15,
+                        color: album.liked
+                            ? const Color(0xFFFF6B9D)
+                            : const Color(0xFF7CDBFF),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            album.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: tt.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              height: 1.3,
+            const SizedBox(height: 8),
+            Text(
+              album.name,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: tt.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            album.author.isEmpty ? 'ID ${album.id}' : album.author,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              album.author.isEmpty ? 'ID ${album.id}' : album.author,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../pages/search/search_page.dart';
 import '../pages/user/profile_page.dart';
 import '../services/widget_bridge.dart';
 import '../state/app_state.dart';
+import '../widgets/glass.dart';
 
 /// 根导航壳：首页 / 分类 / 搜索 / 我的。
 class RootPage extends StatefulWidget {
@@ -37,9 +38,20 @@ class _RootPageState extends State<RootPage> {
   void _switchTo(int i) {
     if (i == _index) return;
     setState(() => _index = i);
-    // jumpToPage 不会触发 onPageChanged（避免 setState 双调用），
-    // 故在此主动 setState 后再跳转。
-    _pageController.jumpToPage(i);
+    // 物理仿真动画开启：animateToPage + easeOutBack 弹簧曲线（轻微过冲
+    // 回弹，模拟弹簧阻尼）；关闭：保持原 jumpToPage（零动画开销）。
+    final physicsOn = context.read<AppState>().anim.physicsAnimations;
+    if (physicsOn) {
+      _pageController
+          .animateToPage(
+            i,
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeOutBack,
+          )
+          .catchError((_) {});
+    } else {
+      _pageController.jumpToPage(i);
+    }
   }
 
   @override
@@ -48,23 +60,27 @@ class _RootPageState extends State<RootPage> {
     final appState = context.watch<AppState>();
     final hasBg = appState.hasCustomBackground;
     final cardOpacity = appState.cardOpacity;
-    // 底部导航栏始终显示。此前"键盘弹起隐藏底栏"的 hack 依赖
-    // MediaQuery.viewInsets，在部分机型（如 vivo edge-to-edge）上
-    // 会残留幽灵 insets 导致底栏永久消失，表现为"底部导航栏无法
-    // 正常显示"。键盘顶起的问题交由 Scaffold 默认行为处理即可。
-    // 关键修复：先前 NavigationBar 的 backgroundColor 直接覆盖为
-    // cs.surface（不应用户设置的 cardOpacity），导致底栏不随
-    // 「选项透明度」滑杆变化。改为应用 cardOpacity.alpha，与
-    // AppTheme 中 navigationBarTheme.backgroundColor 一致行为。
-    final navBarColor = (hasBg || cardOpacity < 1.0)
-        ? cs.surface
-            .withValues(alpha: hasBg ? 0.86 * cardOpacity : cardOpacity)
-        : cs.surface;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // 毛玻璃底栏（UI 重构）：底栏半透明白/暗面板；有自定义背景或前景
+    // 半透明时背后有真实可透内容，启用 BackdropFilter 高斯模糊；
+    // 纯色背景时只做半透明着色，不白跑 saveLayer。
+    final bool glassBlur = hasBg || cardOpacity < 1.0;
+    final Color navBarColor = dark
+        ? Colors.white.withValues(alpha: glassBlur ? 0.10 : 1.0)
+        : glassBlur
+            ? Colors.white.withValues(alpha: 0.68)
+            : cs.surface;
+    // 物理仿真：底栏切换 PageView 用回弹滚动物理。
+    final physicsOn = appState.anim.physicsAnimations;
     return Scaffold(
       body: PageView(
         controller: _pageController,
-        // 物理效果保持默认 PageScrollPhysics（带阻尼/回弹），
-        // 桌面端 AppScrollBehavior 已把鼠标纳入 dragDevices。
+        // 物理仿真动画开启时使用 BouncingScrollPhysics（iOS 式阻尼回弹，
+        // 全平台一致）；关闭时保持默认 Clamping 物理。
+        physics: physicsOn
+            ? const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics())
+            : const AlwaysScrollableScrollPhysics(parent: ClampingScrollPhysics()),
         onPageChanged: (int i) {
           setState(() => _index = i);
           // 同步给 Android 原生用于双击退出判断：根路由（index 任意
@@ -81,44 +97,48 @@ class _RootPageState extends State<RootPage> {
       ),
       // Scaffold 会自动在 NavigationBar 下方垫 MediaQuery.viewPadding.bottom
       // （系统手势条高度），保证 edge-to-edge 下底栏不被遮挡。
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(
-            top: BorderSide(
-              color: cs.outlineVariant.withValues(alpha: 0.45),
-              width: 0.6,
+      // 毛玻璃底栏：GlassBottomBar 在有可透内容时挂 BackdropFilter。
+      bottomNavigationBar: GlassBottomBar(
+        blur: glassBlur,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: cs.outlineVariant.withValues(alpha: 0.45),
+                width: 0.6,
+              ),
             ),
           ),
-        ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          onDestinationSelected: _switchTo,
-          // 应用 cardOpacity，让底栏随「选项透明度」滑杆变透。
-          backgroundColor: navBarColor,
-          surfaceTintColor: navBarColor,
-          shadowColor: Colors.transparent,
-          destinations: const <Widget>[
-            NavigationDestination(
-              icon: Icon(Icons.rocket_launch_outlined),
-              selectedIcon: Icon(Icons.rocket_launch_rounded),
-              label: '发现',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined),
-              selectedIcon: Icon(Icons.grid_view_rounded),
-              label: '分类',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.search_outlined),
-              selectedIcon: Icon(Icons.search_rounded),
-              label: '搜索',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline_rounded),
-              selectedIcon: Icon(Icons.person_rounded),
-              label: '我的',
-            ),
-          ],
+          child: NavigationBar(
+            selectedIndex: _index,
+            onDestinationSelected: _switchTo,
+            // 半透明玻璃底色（glassBlur 时配合高斯模糊成磨砂质感）。
+            backgroundColor: navBarColor,
+            surfaceTintColor: navBarColor,
+            shadowColor: Colors.transparent,
+            destinations: const <Widget>[
+              NavigationDestination(
+                icon: Icon(Icons.rocket_launch_outlined),
+                selectedIcon: Icon(Icons.rocket_launch_rounded),
+                label: '发现',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.grid_view_outlined),
+                selectedIcon: Icon(Icons.grid_view_rounded),
+                label: '分类',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.search_outlined),
+                selectedIcon: Icon(Icons.search_rounded),
+                label: '搜索',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline_rounded),
+                selectedIcon: Icon(Icons.person_rounded),
+                label: '我的',
+              ),
+            ],
+          ),
         ),
       ),
     );

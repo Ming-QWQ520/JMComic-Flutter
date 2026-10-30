@@ -58,16 +58,120 @@ class SettingsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          // ---------- 主题（紧凑横排 Grid，不再每套一行） ----------
+          // ---------- 主题（跟随系统 + 青色双方案预览） ----------
           SectionHeader(title: '主题配色'),
           Card(
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
-              child: _ThemeGrid(
-                value: state.scheme,
-                onChanged: (ThemeScheme? v) {
-                  if (v != null) state.setScheme(v);
-                },
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 10),
+                    child: Text('模式', style: tt.titleSmall),
+                  ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<ThemeMode>(
+                      style: SegmentedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 10),
+                      ),
+                      segments: const <ButtonSegment<ThemeMode>>[
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.system,
+                          label: Text('跟随系统'),
+                          icon: Icon(Icons.brightness_auto_rounded, size: 17),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.light,
+                          label: Text('浅色'),
+                          icon: Icon(Icons.light_mode_outlined, size: 17),
+                        ),
+                        ButtonSegment<ThemeMode>(
+                          value: ThemeMode.dark,
+                          label: Text('深色'),
+                          icon: Icon(Icons.dark_mode_outlined, size: 17),
+                        ),
+                      ],
+                      selected: <ThemeMode>{state.themeMode},
+                      onSelectionChanged: (Set<ThemeMode> s) =>
+                          state.setThemeMode(s.first),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 6),
+                    child: Text('配色（青色）', style: tt.titleSmall),
+                  ),
+                  // 青色双方案预览（唯一色系，仅展示不可选；明暗由上方模式决定）
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: _SchemePreviewTile(
+                          title: '浅色·青',
+                          bg: SchemeColors.lightTeal.bg,
+                          surface: SchemeColors.lightTeal.surface,
+                          primary: SchemeColors.lightTeal.primary,
+                          active: state.scheme == ThemeScheme.lightTeal,
+                          onTap: () => state.setScheme(ThemeScheme.lightTeal),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _SchemePreviewTile(
+                          title: '深色·青',
+                          bg: SchemeColors.darkTeal.bg,
+                          surface: SchemeColors.darkTeal.surface,
+                          primary: SchemeColors.darkTeal.primary,
+                          active: state.scheme == ThemeScheme.darkTeal,
+                          onTap: () => state.setScheme(ThemeScheme.darkTeal),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          // ---------- 动画设置（四类动效独立开关） ----------
+          SectionHeader(title: '动画设置'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  SwitchListTile(
+                    dense: true,
+                    value: state.anim.pageTransitions,
+                    onChanged: (bool v) =>
+                        state.setAnimOption(pageTransitions: v),
+                    title: const Text('页面转场动画'),
+                    subtitle: const Text('页面推入/弹出时的滑动 + 淡入转场'),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    value: state.anim.heroEnabled,
+                    onChanged: (bool v) => state.setAnimOption(hero: v),
+                    title: const Text('Hero 封面联动'),
+                    subtitle: const Text('封面从列表飞入详情页头图'),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    value: state.anim.physicsAnimations,
+                    onChanged: (bool v) => state.setAnimOption(physics: v),
+                    title: const Text('物理仿真动画'),
+                    subtitle: const Text('弹簧回弹 / 阻尼滚动物理效果'),
+                  ),
+                  SwitchListTile(
+                    dense: true,
+                    value: state.anim.card3d,
+                    onChanged: (bool v) => state.setAnimOption(card3d: v),
+                    title: const Text('3D 卡片动画'),
+                    subtitle: const Text('封面卡片随触摸位置透视倾斜'),
+                  ),
+                ],
               ),
             ),
           ),
@@ -795,80 +899,79 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
-/// 主题配色紧凑网格：6 套主题以 3 列 × 2 行的圆点 + 标签呈现，
-/// 替代原来 6 行 RadioListTile（节省垂直空间，主题配色区域从
-/// ~480px 高降到 ~180px 高，不影响触摸目标大小）。
-class _ThemeGrid extends StatelessWidget {
-  const _ThemeGrid({required this.value, required this.onChanged});
+/// 青色方案预览块（点击直接设定对应明暗模式）。
+class _SchemePreviewTile extends StatelessWidget {
+  const _SchemePreviewTile({
+    required this.title,
+    required this.bg,
+    required this.surface,
+    required this.primary,
+    required this.active,
+    required this.onTap,
+  });
 
-  final ThemeScheme value;
-  final ValueChanged<ThemeScheme?> onChanged;
+  final String title;
+  final Color bg;
+  final Color surface;
+  final Color primary;
+  final bool active;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return GridView.count(
-      // 主题仅保留 深浅·橙 / 深浅·青 四套：2×2 网格排布。
-      crossAxisCount: 2,
-      mainAxisSpacing: 4,
-      crossAxisSpacing: 4,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      childAspectRatio: 2.4,
-      children: <Widget>[
-        for (final s in ThemeScheme.values)
-          InkWell(
-            borderRadius: BorderRadius.circular(10),
-            onTap: () => onChanged(s),
-            child: Container(
-              decoration: BoxDecoration(
-                color: value == s
-                    ? cs.primary.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: value == s
-                    ? Border.all(color: cs.primary, width: 1.4)
-                    : null,
-              ),
-              padding:
-                  const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      color: SchemeColors.of(s).primary,
-                      shape: BoxShape.circle,
-                      boxShadow: value == s
-                          ? <BoxShadow>[
-                              BoxShadow(
-                                color: cs.primary.withValues(alpha: 0.3),
-                                blurRadius: 6,
-                                spreadRadius: 1,
-                              ),
-                            ]
-                          : null,
-                    ),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: active ? cs.primary : cs.outlineVariant.withValues(alpha: 0.5),
+            width: active ? 1.6 : 0.8,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black26, width: 0.5),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    s.label,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight:
-                          value == s ? FontWeight.w700 : FontWeight.w500,
-                      color: value == s ? cs.primary : cs.onSurface,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: primary,
+                    shape: BoxShape.circle,
                   ),
-                ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? cs.primary : cs.onSurface,
               ),
             ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 }

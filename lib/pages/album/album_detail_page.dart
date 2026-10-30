@@ -12,6 +12,7 @@ import '../../services/storage_service.dart';
 import '../../state/app_state.dart';
 import '../../widgets/entrance.dart';
 import '../../widgets/feedback.dart';
+import '../../widgets/motion.dart';
 import 'album_comment_page.dart';
 
 /// 漫画详情页（JM 官方 App 风格，对齐需求截图）。
@@ -19,8 +20,8 @@ import 'album_comment_page.dart';
 /// 布局：
 /// - 全幅封面头部：封面铺满 + 顶部返回/购买/分享悬浮按钮 +
 ///   底部渐变遮罩上叠加标题（白）与作者（主题色）；
-/// - 通栏橙色「开始阅读」按钮；
-/// - 三个页签：漫画介绍 / 目录 / 评论（TabBar 橙色下划线，
+/// - 通栏主题色「开始阅读」按钮；
+/// - 三个页签：漫画介绍 / 目录 / 评论（TabBar 主题色下划线，
 ///   NestedScrollView 滚动时头部折叠、页签吸顶）；
 /// - 介绍页签：喜欢/评论/观看 图标统计 + 收藏/下载/连载通知操作、
 ///   JM 号编号、描述、标签（#前缀 + ? 帮助）、作者、更多相关；
@@ -594,14 +595,19 @@ class _HeaderHero extends StatelessWidget {
         // 封面原图：默认只截取封面上半部分（对齐需求"默认截图封面图上半部分"）。
         // 使用 BoxFit.cover + Alignment.topCenter：长封面图自动裁掉下半部，
         // 露出顶部封面图标题区域；用户在详情页内可滚动看到完整封面（PageView）。
+        // Hero 封面联动（设置 > 动画设置 > Hero，默认开）：列表端卡片
+        // 封面与这里共用同一 tag + 同一图片 URL，点击卡片时封面飞入。
         RepaintBoundary(
-          child: coverUrl.isEmpty
-              ? ColoredBox(color: cs.surfaceContainerHighest)
-              : ImageStoreCover(
-                  url: coverUrl,
-                  fit: BoxFit.cover,
-                  alignment: Alignment.topCenter,
-                ),
+          child: HeroCover(
+            albumId: '$albumId',
+            child: coverUrl.isEmpty
+                ? ColoredBox(color: cs.surfaceContainerHighest)
+                : ImageStoreCover(
+                    url: coverUrl,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.topCenter,
+                  ),
+          ),
         ),
         // 渐变遮罩：顶部轻微压暗（悬浮按钮可读）+ 底部重压（标题可读）
         const DecoratedBox(

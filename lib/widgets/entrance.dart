@@ -45,14 +45,24 @@ class Entrance extends StatelessWidget {
   }
 }
 
-/// 点击缩放反馈容器：按下时轻微缩小（0.97），松开回弹。
+/// 点击缩放反馈容器：按下时轻微缩小（0.96），松开回弹。
 ///
+/// [spring] = true（物理仿真动画开启）时释放使用 easeOutBack 弹簧曲线，
+/// 带轻微过冲回弹观感；false 时标准 easeOut。
 /// 仅驱动 Transform（不触发重排），适合卡片/封面等高频元素。
 class PressableScale extends StatefulWidget {
-  const PressableScale({super.key, required this.child, this.onTap});
+  const PressableScale({
+    super.key,
+    required this.child,
+    this.onTap,
+    this.spring = false,
+  });
 
   final Widget child;
   final VoidCallback? onTap;
+
+  /// 是否使用弹簧回弹曲线（对齐「物理仿真动画」开关）。
+  final bool spring;
 
   @override
   State<PressableScale> createState() => _PressableScaleState();
@@ -70,9 +80,12 @@ class _PressableScaleState extends State<PressableScale> {
       onTapCancel: () => setState(() => _down = false),
       onTap: widget.onTap,
       child: AnimatedScale(
-        scale: _down ? 0.97 : 1,
-        duration: const Duration(milliseconds: 110),
-        curve: Curves.easeOut,
+        scale: _down ? 0.96 : 1,
+        duration:
+            Duration(milliseconds: _down ? 110 : (widget.spring ? 320 : 140)),
+        curve: _down
+            ? Curves.easeOut
+            : (widget.spring ? Curves.easeOutBack : Curves.easeOut),
         child: widget.child,
       ),
     );

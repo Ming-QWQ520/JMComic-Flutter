@@ -4,6 +4,7 @@ import 'package:encrypt/encrypt.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:jmcomic/core/constants.dart';
+import 'package:jmcomic/core/protocol/jm_client.dart';
 import 'package:jmcomic/core/protocol/jm_crypto.dart';
 import 'package:jmcomic/core/protocol/jm_domain.dart';
 import 'package:jmcomic/core/utils/scramble.dart';
@@ -163,6 +164,94 @@ void main() {
         Scramble.filenameFromUrl('https://cdn/media/photos/422889/00123.jpg'),
         '00123',
       );
+    });
+  });
+
+  group('注册修复回归（0.1.2）', () {
+    test('parseJsonLenient：干净 JSON 直接解析', () {
+      final r = JmClient.parseJsonLenient('{"code":200,"msg":"ok"}');
+      expect(r, isA<Map<dynamic, dynamic>>());
+      expect((r as Map)['code'], 200);
+    });
+
+    test('parseJsonLenient：信封后带 PHP 日志尾巴（线上实测样本）', () {
+      // 线上部分线路会在 JSON 后附加 php_runtime.log 写入权限告警，
+      // 严格 jsonDecode 抛 "Extra data" 导致注册全线路误报失败。
+      const body = '{"code":200,"data":"abc+/=="}'
+          '[2026-10-31 00:38:43] /www/wwwroot/18comic/include/../tmp/logs/'
+          'php_runtime.log 沒有寫入權限c';
+      final r = JmClient.parseJsonLenient(body);
+      expect(r, isA<Map<dynamic, dynamic>>());
+      expect((r as Map)['data'], 'abc+/==');
+    });
+
+    test('parseJsonLenient：字符串内含花括号/引号不受干扰', () {
+      const body = '{"msg":"包含 {大括号} 与 \\"引号\\" 的消息"} trailing log';
+      final r = JmClient.parseJsonLenient(body) as Map;
+      expect(r['msg'], contains('大括号'));
+    });
+
+    test('parseJsonLenient：非 JSON 输入抛 FormatException', () {
+      expect(() => JmClient.parseJsonLenient('纯文本错误页'),
+          throwsFormatException);
+      expect(() => JmClient.parseJsonLenient('{"code":200'), throwsFormatException);
+    });
+  });
+
+  group('主题迁移回归（0.1.2 去橙色）', () {
+    test('ThemeScheme 仅剩深/浅青两套', () {
+      expect(ThemeScheme.values.length, 2);
+      expect(ThemeScheme.values.map((e) => e.key),
+          containsAll(<String>['light_teal', 'dark_teal']));
+    });
+
+    test('fromKey 旧橙色/粉色 key 自动迁移到青色', () {
+      expect(ThemeScheme.fromKey('light_orange'), ThemeScheme.lightTeal);
+      expect(ThemeScheme.fromKey('dark_orange'), ThemeScheme.darkTeal);
+      expect(ThemeScheme.fromKey('light_pink'), ThemeScheme.lightTeal);
+      expect(ThemeScheme.fromKey('dark_pink'), ThemeScheme.darkTeal);
+      expect(ThemeScheme.fromKey('light_teal'), ThemeScheme.lightTeal);
+      expect(ThemeScheme.fromKey('dark_teal'), ThemeScheme.darkTeal);
+      // 未知 key 回落浅色青
+      expect(ThemeScheme.fromKey('unknown'), ThemeScheme.lightTeal);
+    });
+
+    test('SchemeColors 色板不再含橙色', () {
+      for (final s in ThemeScheme.values) {
+        final c = SchemeColors.of(s);
+        // 青色主色：绿分量应显著高于红分量
+        expect(c.primary.r * 255, lessThan(c.primary.g * 255),
+            reason: s.key);
+      }
+    });
+  });
+
+  group('动画设置默认值（0.1.2）', () {
+    test('默认只开启页面转场与 Hero', () {
+      final a = AnimationOptions();
+      expect(a.pageTransitions, isTrue);
+      expect(a.heroEnabled, isTrue);
+      expect(a.physicsAnimations, isFalse);
+      expect(a.card3d, isFalse);
+    });
+
+    test('fromMap 缺省回落默认值', () {
+      final a = AnimationOptions.fromMap(<String, Object>{});
+      expect(a.pageTransitions, isTrue);
+      expect(a.heroEnabled, isTrue);
+      expect(a.physicsAnimations, isFalse);
+      expect(a.card3d, isFalse);
+      // 显式覆盖生效
+      final b = AnimationOptions.fromMap(<String, Object>{
+        'anim_physics': true,
+        'anim_card3d': true,
+        'anim_page_transitions': false,
+        'anim_hero': false,
+      });
+      expect(b.pageTransitions, isFalse);
+      expect(b.heroEnabled, isFalse);
+      expect(b.physicsAnimations, isTrue);
+      expect(b.card3d, isTrue);
     });
   });
 }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import 'core/constants.dart';
 import 'core/theme/app_theme.dart';
 import 'main.dart';
 import 'pages/album/album_detail_page.dart';
@@ -52,9 +53,11 @@ class JmComicApp extends StatelessWidget {
           child: MaterialApp(
           navigatorKey: rootNavigatorKey,
           title: 'JMComic-Flutter',
-          theme: AppTheme.light(scheme, hasBg, state.cardOpacity),
-          darkTheme: AppTheme.dark(scheme, hasBg, state.cardOpacity),
-          themeMode: scheme.isDark ? ThemeMode.dark : ThemeMode.light,
+          // 青色双方案：theme 为浅色青，darkTheme 为深色青；
+          // themeMode 由「设置 > 主题配色」控制（跟随系统/浅色/深色）。
+          theme: AppTheme.light(ThemeScheme.lightTeal, hasBg, state.cardOpacity),
+          darkTheme: AppTheme.dark(ThemeScheme.darkTeal, hasBg, state.cardOpacity),
+          themeMode: state.themeMode,
           debugShowCheckedModeBanner: false,
           scrollBehavior: const AppScrollBehavior(),
           // 关键修复：必须显式提供本地化委托。此前未配置，新版本 Flutter
@@ -113,6 +116,10 @@ class JmComicApp extends StatelessWidget {
             // 同步给 Android 原生用于双击退出判断。
             // pop 时由 _RootObserver.didPop 自动恢复 isAtRoot=true。
             WidgetBridge.instance.isAtRoot = false;
+            // 动画设置 > 页面转场：关闭时改用无转场路由（瞬时切换）。
+            if (!state.anim.pageTransitions) {
+              return _instantRoute(settings);
+            }
             switch (settings.name) {
               case '/album':
                 return SlideRightRoute<void>(
@@ -208,8 +215,8 @@ class SlideRightRoute<T> extends PageRoute<T> {
     super.settings,
     this.maintainState = true,
     this.barrierColor = Colors.transparent,
-    this.transitionDuration = const Duration(milliseconds: 280),
-    this.reverseTransitionDuration = const Duration(milliseconds: 220),
+    this.transitionDuration = const Duration(milliseconds: 300),
+    this.reverseTransitionDuration = const Duration(milliseconds: 230),
   });
 
   final WidgetBuilder builder;
@@ -253,7 +260,7 @@ class SlideRightRoute<T> extends PageRoute<T> {
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
-    // 进入时：从右侧 100% 位置滑入；退出时：向右滑出。
+    // 进入时：从右侧 100% 位置滑入 + 轻微淡入；退出时：向右滑出。
     final inOffset = Tween<Offset>(
       begin: const Offset(1.0, 0),
       end: Offset.zero,
@@ -271,6 +278,74 @@ class SlideRightRoute<T> extends PageRoute<T> {
         child: child,
       ),
     );
+  }
+}
+
+/// 无转场路由（设置 > 动画设置 > 页面转场关闭时使用）：
+/// 瞬时切换，不做任何位移动画，保持边缘滑返回可用。
+class InstantRoute<T> extends PageRoute<T> {
+  InstantRoute({required this.builder, super.settings});
+
+  final WidgetBuilder builder;
+
+  @override
+  bool get maintainState => true;
+
+  @override
+  Color get barrierColor => Colors.transparent;
+
+  @override
+  Duration get transitionDuration => Duration.zero;
+
+  @override
+  Duration get reverseTransitionDuration => Duration.zero;
+
+  @override
+  bool get barrierDismissible => false;
+
+  @override
+  String get barrierLabel => '';
+
+  @override
+  Widget buildPage(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation) {
+    return builder(context);
+  }
+
+  @override
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    return child;
+  }
+}
+
+/// 按路由名构造对应的瞬时路由（与 onGenerateRoute 的页面映射一致）。
+PageRoute<dynamic> _instantRoute(RouteSettings settings) {
+  switch (settings.name) {
+    case '/album':
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const AlbumDetailPage());
+    case '/reader':
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const ReaderPage());
+    case '/local_reader':
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const LocalReaderPage());
+    case '/week':
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const WeekPage());
+    case '/search':
+      final q = settings.arguments;
+      return InstantRoute<void>(
+        settings: settings,
+        builder: (_) => SearchPage(initialQuery: q is String ? q : ''),
+      );
+    case '/login':
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const LoginPage());
+    default:
+      return InstantRoute<void>(
+          settings: settings, builder: (_) => const RootPage());
   }
 }
 

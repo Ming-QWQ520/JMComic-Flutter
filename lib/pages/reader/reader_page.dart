@@ -475,7 +475,7 @@ class _ReaderPageState extends State<ReaderPage> {
   void _toggleTheme() {
     final app = context.read<AppState>();
     app.setScheme(
-      app.scheme.isDark ? ThemeScheme.lightOrange : ThemeScheme.darkOrange,
+      app.scheme.isDark ? ThemeScheme.lightTeal : ThemeScheme.darkTeal,
     );
   }
 

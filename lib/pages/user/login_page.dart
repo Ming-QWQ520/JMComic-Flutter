@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/protocol/jm_api.dart';
 import '../../state/app_state.dart';
+import '../../widgets/glass.dart';
 
 /// 登录页（对齐 qt LoginReq2：POST /login）。
 ///
@@ -59,11 +60,20 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    // 毛玻璃表单卡（UI 重构）：登录表单落在磨砂玻璃面板上。
     return Scaffold(
       appBar: AppBar(title: const Text('登录')),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: <Widget>[
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: GlassPanel(
+              borderRadius: BorderRadius.circular(24),
+              padding: const EdgeInsets.fromLTRB(20, 26, 20, 18),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
           const SizedBox(height: 20),
           Container(
             width: 76,
@@ -146,7 +156,11 @@ class _LoginPageState extends State<LoginPage> {
             style: Theme.of(context).textTheme.labelSmall
                 ?.copyWith(color: cs.outline),
           ),
-        ],
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -296,6 +310,21 @@ class _RegisterPageState extends State<RegisterPage> {
       _email.text.trim().isNotEmpty &&
       _agree;
 
+  /// 服务端邮箱域名白名单（实测失败响应：此Email域名不在允許的白名單中。
+  /// 請使用@gmail.com, @qq.com）。提交前本地预校验，避免一次无效往返。
+  static const List<String> _emailWhitelist = <String>['gmail.com', 'qq.com'];
+
+  /// 返回 null 表示邮箱可用，否则返回给用户看的提示文案。
+  String? get _emailError {
+    final e = _email.text.trim();
+    if (e.isEmpty) return null;
+    final domain = e.contains('@') ? e.split('@').last.toLowerCase() : '';
+    if (!_emailWhitelist.contains(domain)) {
+      return '目前服务端仅支持 @gmail.com / @qq.com 邮箱';
+    }
+    return null;
+  }
+
   Future<void> _submit() async {
     final u = _user.text.trim();
     final p = _pass.text;
@@ -309,6 +338,12 @@ class _RegisterPageState extends State<RegisterPage> {
     if (p != p2) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('两次密码不一致')));
+      return;
+    }
+    final emailErr = _emailError;
+    if (emailErr != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('注册失败: $emailErr')));
       return;
     }
     if (!_agree) {
@@ -404,11 +439,20 @@ class _RegisterPageState extends State<RegisterPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 毛玻璃表单卡（UI 重构）：注册表单落在磨砂玻璃面板上。
     return Scaffold(
       appBar: AppBar(title: Text(_confirmStage ? '邮箱验证' : '注册账号')),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: <Widget>[
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: GlassPanel(
+              borderRadius: BorderRadius.circular(24),
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
           if (!_confirmStage) ...<Widget>[
             // —— 注册表单（对齐官方 signUp 表单，无需验证码）——
             TextField(
@@ -420,7 +464,12 @@ class _RegisterPageState extends State<RegisterPage> {
             TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: '邮箱（用于接收验证码）'),
+              decoration: InputDecoration(
+                labelText: '邮箱（用于接收验证码）',
+                helperText: '目前仅支持 @gmail.com / @qq.com',
+                errorText: _emailError,
+              ),
+              onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -537,6 +586,10 @@ class _RegisterPageState extends State<RegisterPage> {
             ),
           ],
         ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

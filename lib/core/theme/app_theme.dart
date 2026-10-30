@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../constants.dart';
 
-/// 应用主题（对齐 JMComic-qt 的 6 套 QSS 主题配色）。
+/// 应用主题（青色双方案：浅色·青 / 深色·青）。
 class AppTheme {
   AppTheme._();
 
@@ -14,14 +14,14 @@ class AppTheme {
   /// 透明度，0~1。1=完全不透明，<1 时 surface 色按比例变透，使全局
   /// 自定义背景从前景卡片缝隙透出，对应设置页「选项透明度」。
   static ThemeData light(
-          [ThemeScheme scheme = ThemeScheme.lightOrange,
+          [ThemeScheme scheme = ThemeScheme.lightTeal,
           bool transparent = false,
           double cardOpacity = 1.0]) =>
       _build(scheme, Brightness.light, transparent, cardOpacity);
 
   /// 按方案构建深色主题。
   static ThemeData dark(
-          [ThemeScheme scheme = ThemeScheme.darkOrange,
+          [ThemeScheme scheme = ThemeScheme.darkTeal,
           bool transparent = false,
           double cardOpacity = 1.0]) =>
       _build(scheme, Brightness.dark, transparent, cardOpacity);

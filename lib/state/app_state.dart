@@ -21,9 +21,23 @@ class AppState extends ChangeNotifier {
     // 同步预载全部个性化设置（main() 已在 runApp 前 warmUp SharedPreferences，
     // 同步读取直接命中缓存）——保证首帧就是保存的主题/背景/透明度，
     // 而不是"先默认样式、init 完成后再跳变"。
-    _scheme = ThemeScheme.fromKey(
-      _store.getStringSync('theme_scheme', 'light_orange'),
-    );
+    // 需求变更：默认主题跟随系统（未设置过 theme_mode 时取系统明暗）。
+    final savedMode = _store.getStringSync('theme_mode', '');
+    _themeMode = switch (savedMode) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+    // 旧版 scheme key（light_orange/dark_orange/pink）不再读取：
+    // theme_mode 为准；用户下次改主题时会覆盖写入新 key。
+    _scheme = _resolveScheme();
+    _listenSystemBrightness();
+    _anim = AnimationOptions.fromMap(<String, Object>{
+      'anim_page_transitions': _store.getBoolSync('anim_page_transitions', true),
+      'anim_hero': _store.getBoolSync('anim_hero', true),
+      'anim_physics': _store.getBoolSync('anim_physics', false),
+      'anim_card3d': _store.getBoolSync('anim_card3d', false),
+    });
     _volumeKeyPaging = _store.getBoolSync('volume_key_paging', true);
     _readDirection = switch (_store.getStringSync('read_direction', 'vertical')) {
       'horizontal' => ReadDirection.horizontal,
@@ -63,9 +77,39 @@ class AppState extends ChangeNotifier {
   bool _ready = false;
   bool get ready => _ready;
 
-  // ---------- 主题（对齐 qt 6 套配色） ----------
-  ThemeScheme _scheme = ThemeScheme.lightOrange;
+  // ---------- 主题（青色双方案 + 跟随系统） ----------
+  ThemeMode _themeMode = ThemeMode.system;
+  ThemeMode get themeMode => _themeMode;
+
+  /// 当前生效方案（跟随系统时按系统明暗解析）。
+  ThemeScheme _scheme = ThemeScheme.lightTeal;
   ThemeScheme get scheme => _scheme;
+
+  /// 按当前 themeMode 与系统明暗解析生效方案。
+  ThemeScheme _resolveScheme() {
+    final bool dark;
+    switch (_themeMode) {
+      case ThemeMode.light:
+        dark = false;
+      case ThemeMode.dark:
+        dark = true;
+      case ThemeMode.system:
+        dark = WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark;
+    }
+    return dark ? ThemeScheme.darkTeal : ThemeScheme.lightTeal;
+  }
+
+  /// 监听系统明暗变化：跟随系统模式下实时切换深浅主题。
+  void _listenSystemBrightness() {
+    WidgetsBinding.instance.platformDispatcher.onPlatformBrightnessChanged = () {
+      if (_themeMode != ThemeMode.system) return;
+      final next = _resolveScheme();
+      if (next == _scheme) return;
+      _scheme = next;
+      notifyListeners();
+    };
+  }
 
   // ---------- 阅读设置（对齐 qt Setting） ----------
   bool _volumeKeyPaging = true;
@@ -127,6 +171,37 @@ class AppState extends ChangeNotifier {
   bool _appLockEnabled = false;
   bool get appLockEnabled => _appLockEnabled;
 
+  // ---------- 动画设置（设置 > 动画设置） ----------
+  /// 四类动效开关，默认只开「页面转场 + Hero」。
+  AnimationOptions _anim = AnimationOptions();
+  AnimationOptions get anim => _anim;
+
+  /// 写入单个动画开关并持久化。
+  Future<void> setAnimOption({
+    bool? pageTransitions,
+    bool? hero,
+    bool? physics,
+    bool? card3d,
+  }) async {
+    if (pageTransitions != null) {
+      _anim.pageTransitions = pageTransitions;
+      await _store.setBool('anim_page_transitions', pageTransitions);
+    }
+    if (hero != null) {
+      _anim.heroEnabled = hero;
+      await _store.setBool('anim_hero', hero);
+    }
+    if (physics != null) {
+      _anim.physicsAnimations = physics;
+      await _store.setBool('anim_physics', physics);
+    }
+    if (card3d != null) {
+      _anim.card3d = card3d;
+      await _store.setBool('anim_card3d', card3d);
+    }
+    notifyListeners();
+  }
+
   /// 写入应用锁开关（设置页在本地认证通过后才调用）。
   Future<void> setAppLockEnabled(bool v) async {
     _appLockEnabled = v;
@@ -180,9 +255,20 @@ class AppState extends ChangeNotifier {
   /// 初始化：恢复持久化设置 → 恢复登录态 → 解析主机并拉取 setting（图床）。
   Future<void> init() async {
     try {
-      _scheme = ThemeScheme.fromKey(
-        await _store.getString('theme_scheme', 'light_orange'),
-      );
+      final savedMode = await _store.getString('theme_mode', '');
+      _themeMode = switch (savedMode) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      };
+      _scheme = _resolveScheme();
+      _anim = AnimationOptions.fromMap(<String, Object>{
+        'anim_page_transitions':
+            await _store.getBool('anim_page_transitions', true),
+        'anim_hero': await _store.getBool('anim_hero', true),
+        'anim_physics': await _store.getBool('anim_physics', false),
+        'anim_card3d': await _store.getBool('anim_card3d', false),
+      });
       _volumeKeyPaging = await _store.getBool('volume_key_paging', true);
       _readDirection = switch (await _store.getString(
         'read_direction',
@@ -278,11 +364,20 @@ class AppState extends ChangeNotifier {
 
   // ---------- 设置项写入 ----------
 
-  Future<void> setScheme(ThemeScheme s) async {
-    _scheme = s;
+  /// 切换主题模式（跟随系统/浅色/深色），持久化并即时生效。
+  Future<void> setThemeMode(ThemeMode mode) async {
+    _themeMode = mode;
+    _scheme = _resolveScheme();
     notifyListeners();
-    await _store.setString('theme_scheme', s.key);
+    await _store.setString('theme_mode', mode.name);
+    // 同步写入 scheme key，保持旧字段语义一致（清理/回滚友好）。
+    await _store.setString('theme_scheme', _scheme.key);
   }
+
+  /// 兼容入口：直接选择深/浅方案（等价于显式设定对应主题模式）。
+  Future<void> setScheme(ThemeScheme s) async => setThemeMode(
+        s.isDark ? ThemeMode.dark : ThemeMode.light,
+      );
 
   Future<void> setVolumeKeyPaging(bool v) async {
     _volumeKeyPaging = v;

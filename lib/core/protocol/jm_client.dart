@@ -752,6 +752,51 @@ class JmClient {
     return t.length <= max ? t : '${t.substring(0, max)}…';
   }
 
+  /// 宽松解析响应 JSON：部分线路的 PHP 会在信封 JSON 后附加调试日志
+  /// （实测 `{"code":200,"data":"…"}[2026-10-31] …/php_runtime.log 沒有寫入權限`），
+  /// 严格 jsonDecode 会抛 "Extra data" FormatException，被上层当作
+  /// 「响应非 JSON」判定本次线路失败——注册等请求在全部线路上都会
+  /// 撞上同样的日志尾巴，最终误报「全部线路失败」。
+  /// 这里用括号配对扫描提取首个完整 JSON 对象后再解析。
+  static dynamic parseJsonLenient(String body) {
+    try {
+      return jsonDecode(body);
+    } on FormatException {
+      // 信封后带日志尾巴等场景：继续走括号配对扫描兜底
+    }
+    final start = body.indexOf('{');
+    if (start < 0) {
+      throw const FormatException('响应非 JSON 对象');
+    }
+    var depth = 0;
+    var inStr = false;
+    var escaped = false;
+    for (var i = start; i < body.length; i++) {
+      final ch = body[i];
+      if (inStr) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == r'\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inStr = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inStr = true;
+      } else if (ch == '{') {
+        depth++;
+      } else if (ch == '}') {
+        depth--;
+        if (depth == 0) {
+          return jsonDecode(body.substring(start, i + 1));
+        }
+      }
+    }
+    throw const FormatException('响应 JSON 不完整');
+  }
+
   /// 读取响应文本（gzip 由 HttpClient 自动解压）。
   Future<String> _readText(HttpClientResponse resp) async {
     try {
@@ -773,6 +818,11 @@ class JmClient {
   /// 解密响应信封 `{"code":..,"msg"/"errorMsg":..,"data":"<base64密文>"}`。
   ///
   /// [ts] 为本次请求头 tokenparam 中的时间戳（服务端用它派生加密密钥）。
+  ///
+  /// 关键修复（注册无法使用）：解析信封改用 [parseJsonLenient]——
+  /// 部分线路 PHP 会在 JSON 后附加运行日志尾巴（php_runtime.log 写入
+  /// 权限告警），严格 jsonDecode 直接抛 "Extra data"，导致注册等请求
+  /// 被误判为「响应非 JSON」而全线路失败。
   Future<JmResponse> _decryptResponse(
     HttpClientResponse resp, {
     required String ts,
@@ -780,7 +830,7 @@ class JmClient {
     final body = await _readText(resp);
     Map<String, dynamic> envelope;
     try {
-      final decoded = jsonDecode(body);
+      final decoded = parseJsonLenient(body);
       if (decoded is Map<String, dynamic>) {
         envelope = decoded;
       } else {

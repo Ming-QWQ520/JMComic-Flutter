@@ -59,9 +59,14 @@ void main() {
 
   group('AlbumCard', () {
     testWidgets('渲染标题与作者信息', (WidgetTester tester) async {
+      // AlbumCard 内部通过 provider select 读取动画开关（3D 卡片/物理
+      // 仿真），测试宿主需提供 AppState。
       await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(body: AlbumCard(album: _fakeAlbum())),
+        ChangeNotifierProvider<AppState>.value(
+          value: AppState(),
+          child: MaterialApp(
+            home: Scaffold(body: AlbumCard(album: _fakeAlbum())),
+          ),
         ),
       );
       // 等待一帧，确保卡片布局稳定。

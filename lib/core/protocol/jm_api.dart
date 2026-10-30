@@ -69,10 +69,17 @@ class JmApi {
   /// 参数仅 {username, email, password, password_confirm, gender}，
   /// 与 login 同一套 Token/Tokenparam 签名协议，**无需 Web 验证码**。
   ///
-  /// 关键修复（注册无法使用）：旧实现走 Web 域名 /signup（带 captcha），
+  /// 关键修复（注册无法使用）①：旧实现走 Web 域名 /signup（带 captcha），
   /// 该域名受 Cloudflare 严格防护，dart:io TLS 指纹会被拦截
   /// （"Just a moment..." 挑战页），注册必然失败。
   /// 改走 API 域名后与登录共用多级线路容错，成功率与 login 一致。
+  ///
+  /// 关键修复（注册无法使用）②：服务端即使业务失败（邮箱域名不在
+  /// 白名单 / 用户名已存在等）也返回 HTTP 200 + 信封 code=200，真实
+  /// 结果藏在解密后的 data 字段 `{"status":"fail","msg":…}`。官方
+  /// MemberModal 以 `data.status === "ok"` 判定成功；旧实现把 code=200
+  /// 一律当成功，失败信息被当成功提示且误入验证码阶段。现由
+  /// [_accountOpResult] 统一对齐官方判定。
   ///
   /// API 注册失败时自动回退 Web /signup 流程（[registerViaWeb]）。
   /// 返回 (是否成功, 消息)。
@@ -92,11 +99,7 @@ class JmApi {
         'password_confirm': passwd2,
         'gender': sex,
       });
-      // 标准加密信封：code=200 即成功；业务错误（如用户名已存在）
-      // 由 _decryptResponse 抛 JmApiException，在 catch 中转 Web 流程前
-      // 先把服务端消息透出（这类错误换渠道也无法解决）。
-      final msg = r.msg.isNotEmpty ? r.msg : '注册成功，请查收验证邮件';
-      return (true, msg);
+      return _accountOpResult(r, successFallback: '注册成功，请查收验证邮件');
     } on JmApiException {
       rethrow; // 业务错误直接透出真实原因（如「用户名已存在」）
     } catch (_) {
@@ -113,6 +116,9 @@ class JmApi {
   /// [numcode] 与 [password] 二选一：
   /// - 带 [numcode]：提交邮箱验证码完成验证；
   /// - 带 [password]：重发验证邮件（官方 resend 分支）。
+  ///
+  /// 关键修复（注册无法使用）②同款：验证码错误时服务端同样返回
+  /// code=200 + data.status="fail"，旧实现误报「操作成功」。
   Future<(bool, String)> registerConfirm(
     String user, {
     String numcode = '',
@@ -123,7 +129,7 @@ class JmApi {
       if (numcode.isNotEmpty) 'numcode': numcode,
       if (password.isNotEmpty) 'password': password,
     });
-    return (true, r.msg.isNotEmpty ? r.msg : '操作成功');
+    return _accountOpResult(r, successFallback: '操作成功');
   }
 
   /// 重新发送注册验证邮件（对齐官方 resend：POST /confirm {username,
@@ -139,12 +145,46 @@ class JmApi {
   Future<(bool, String)> resetPassword(String email) async {
     try {
       final r = await _c.postForm('forgot', <String, dynamic>{'email': email});
-      return (true, r.msg.isNotEmpty ? r.msg : '新密码已发送至邮箱');
+      return _accountOpResult(r, successFallback: '新密码已发送至邮箱');
     } on JmApiException {
       rethrow;
     } catch (_) {
       return resetPasswordViaWeb(email);
     }
+  }
+
+  /// 解析账号类接口（register / confirm / forgot）的业务结果。
+  ///
+  /// 关键修复（注册无法使用）②：服务端业务失败时也是 HTTP 200 +
+  /// 信封 code=200，真实结果在解密后的 data 字段：
+  /// `{"type":"","msg":"…","status":"fail","errors":[…]}`。
+  /// 官方 2.1.12 MemberModal 以 `data.status === "ok"` 判定成功、
+  /// 否则按 error snackbar 展示 data.msg，这里逐字对齐：
+  /// - data.status == "fail" → (false, data.msg / errors[0] / 信封 msg)；
+  /// - data.status == "ok"  → (true, data.msg 或 [successFallback])；
+  /// - data 无 status 字段 → 回退信封 code==200 即成功
+  ///   （兼容部分线路返回明文或空 data 的形态）。
+  (bool, String) _accountOpResult(
+    JmResponse r, {
+    required String successFallback,
+  }) {
+    final d = r.data;
+    if (d is Map) {
+      final status = (d['status'] ?? '').toString();
+      final msg = (d['msg'] ?? d['errorMsg'] ?? '').toString();
+      final errors = d['errors'];
+      final firstErr =
+          errors is List && errors.isNotEmpty ? errors.first.toString() : '';
+      if (status == 'fail') {
+        return (false, msg.isNotEmpty ? msg : (firstErr.isNotEmpty ? firstErr : r.msg));
+      }
+      if (status == 'ok') {
+        return (true, msg.isNotEmpty ? msg : successFallback);
+      }
+    }
+    // data 非结构化 / 无 status 字段：信封 code==200（_decryptResponse
+    // 已保证走到这里的都是 code==200）即按成功处理。
+    return (true, r.msg.isNotEmpty ? r.msg : successFallback);
   }
 
   /// Web 端注册回退（对齐 qt RegisterReq：POST /signup + captcha）。

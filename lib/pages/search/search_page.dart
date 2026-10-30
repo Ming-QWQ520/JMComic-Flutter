@@ -50,11 +50,11 @@ class _SearchPageState extends State<SearchPage>
   /// 搜索类型（对齐 qt GetSearchReq2 search_type）。
   String _searchType = '';
 
-  /// 长按 2s 后解锁删除模式的历史项下标集合（修复需求：长按历史项
-  /// 2 秒后右侧出现 X，点击 X 即删除；点击其它区域退出删除模式）。
+  /// 长按 1s 后解锁删除模式的历史项下标集合（需求变更：长按历史项
+  /// 1 秒后右侧出现 X，点击 X 即删除；点击其它区域退出删除模式）。
   final Set<int> _editingHistory = <int>{};
 
-  /// 长按计时器（每项一个，2s 后把该项加入 _editingHistory）。
+  /// 长按计时器（每项一个，1s 后把该项加入 _editingHistory）。
   Timer? _longPressTimer;
 
   static const Map<String, String> _searchTypes = <String, String>{
@@ -281,10 +281,10 @@ class _SearchPageState extends State<SearchPage>
     if (_keyword.isNotEmpty) _search(_keyword);
   }
 
-  /// 搜索历史条目（长按 2s 后右侧出现 X，点击 X 删除）。
+  /// 搜索历史条目（长按 1s 后右侧出现 X，点击 X 删除）。
   ///
   /// 交互细节：
-  /// - 按下开始计时 2s；提前松手/移出则取消（不打断正常点击搜索）；
+  /// - 按下开始计时 1s；提前松手/移出则取消（不打断正常点击搜索）；
   /// - 计时结束：轻微震动反馈 + 该条目进入编辑态（X 滑入出现）；
   /// - 点击 X：删除该条历史（其后的条目下标左移，编辑态同步清理）；
   /// - 点击任意其它位置/条目：退出编辑态（点击条目仍会正常搜索）。
@@ -292,11 +292,11 @@ class _SearchPageState extends State<SearchPage>
     final editing = _editingHistory.contains(index);
     final cs = Theme.of(context).colorScheme;
     return GestureDetector(
-      // 长按 2s 计时：onLongPressStart 后等待 2s 再激活编辑态，
-      // 而不是系统默认的立即触发（需求明确要求长按 2s）。
+      // 长按 1s 计时：onLongPressStart 后等待 1s 再激活编辑态，
+      // 而不是系统默认的立即触发（需求变更：长按 1s）。
       onLongPressStart: (_) {
         _longPressTimer?.cancel();
-        _longPressTimer = Timer(const Duration(seconds: 2), () {
+        _longPressTimer = Timer(const Duration(seconds: 1), () {
           if (!mounted) return;
           HapticFeedback.mediumImpact();
           setState(() => _editingHistory.add(index));
@@ -525,7 +525,7 @@ class _SearchPageState extends State<SearchPage>
           Padding(
             padding: const EdgeInsets.only(top: 2),
             child: Text(
-              '提示：长按条目 2 秒可删除单条历史',
+              '提示：长按条目 1 秒可删除单条历史',
               style: tt.labelSmall?.copyWith(
                 color: cs.onSurfaceVariant.withValues(alpha: 0.8),
               ),

@@ -91,7 +91,7 @@ class _ProfilePageState extends State<ProfilePage> {
           SectionHeader(title: '更多'),
           _group(context, <Widget>[
             _tile(context, Icons.restaurant_rounded, '深夜食堂', '专栏文章 / 随笔',
-                const Color(0xFFFF7B00),
+                const Color(0xFF00BFA5),
                 () => Navigator.push(context,
                     MaterialPageRoute<void>(builder: (_) => const BlogsPage()))),
             _tile(context, Icons.settings_rounded, '设置', '主题 / 线路 / 下载 / DoH / 阅读设置',

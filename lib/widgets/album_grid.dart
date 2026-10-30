@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../core/protocol/models.dart';
 import 'album_card.dart';
+import 'entrance.dart';
 import 'feedback.dart';
 
 /// 无限滚动专辑网格（最新/搜索/分类/收藏/历史等复用）。
@@ -198,9 +199,15 @@ class AlbumGridState extends State<AlbumGrid> {
           return TailLoader(done: _noMore);
         }
         final a = _items[i];
-        return AlbumCard(
-          album: a,
-          onTap: () => Navigator.pushNamed(context, '/album', arguments: a),
+        // 错峰入场动画：新滚入视口的条目淡入 + 轻微上移（每屏 12 档
+        // 循环，避免长列表后段延迟过长）。「增加多动画」的一部分。
+        return Entrance(
+          delay: Duration(milliseconds: 34 * (i % 12)),
+          duration: const Duration(milliseconds: 280),
+          child: AlbumCard(
+            album: a,
+            onTap: () => Navigator.pushNamed(context, '/album', arguments: a),
+          ),
         );
       },
     );
